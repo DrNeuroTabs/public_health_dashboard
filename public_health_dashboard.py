@@ -31,54 +31,94 @@ EU_CODES = [
 
 # Map of Disease Codes → Full Descriptions
 CAUSE_NAME_MAP = {
-    "F_OTH":    "Other mental and behavioural disorders (remainder of F00-F99)",
-    "G_H":      "Diseases of the nervous system and the sense organs (G00-H95)",
-    "G20":      "Parkinson disease",
-    "G30":      "Alzheimer disease",
-    "G_H_OTH":  "Other diseases of the nervous system and the sense organs (remainder of G00-H95)",
-    "I":        "Diseases of the circulatory system (I00-I99)",
-    "I20-I25":  "Ischaemic heart diseases",
-    "I21_I22":  "Acute myocardial infarction including subsequent myocardial infarction",
-    "I20_I23-I25": "Other ischaemic heart diseases",
-    "I30-I51": "Other heart diseases",
-    "I60-I69": "Cerebrovascular diseases",
-    "I_OTH":   "Other diseases of the circulatory system (remainder of I00-I99)",
-    "J":        "Diseases of the respiratory system (J00-J99)",
-    "J09-J11":  "Influenza (including swine flu)",
-    "J12-J18":  "Pneumonia",
-    "J40-J47":  "Chronic lower respiratory diseases",
-    "J45_J46":  "Asthma and status asthmaticus",
-    "J40-J44_J47": "Other lower respiratory diseases",
-    "J_OTH":   "Other diseases of the respiratory system (remainder of J00-J99)",
-    "K":        "Diseases of the digestive system (K00-K93)",
-    "K25-K28":  "Ulcer of stomach, duodenum and jejunum",
-    "K70_K73_K74": "Chronic liver disease",
-    "K_OTH":   "Other diseases of the digestive system (remainder of K00-K93)",
-    "L":        "Diseases of the skin and subcutaneous tissue (L00-L99)",
-    "M":        "Diseases of the musculoskeletal system and connective tissue (M00-M99)",
-    "RHEUM_ARTHRO": "Rheumatoid arthritis and arthrosis (M05-M06,M15-M19)",
-    "M_OTH":   "Other diseases of the musculoskeletal system and connective tissue (remainder of M00-M99)",
-    "N":        "Diseases of the genitourinary system (N00-N99)",
-    "N00-N29":  "Diseases of kidney and ureter",
-    "N_OTH":   "Other diseases of the genitourinary system (remainder of N00-N99)",
-    "O":        "Pregnancy, childbirth and the puerperium (O00-O99)",
-    "P":        "Certain conditions originating in the perinatal period (P00-P96)",
-    "Q":        "Congenital malformations, deformations and chromosomal abnormalities (Q00-Q99)",
-    "R":        "Symptoms, signs and abnormal clinical and laboratory findings, not elsewhere classified (R00-R99)",
-    "R95":      "Sudden infant death syndrome",
-    "R96-R99":  "Ill-defined and unknown causes of mortality",
-    "R_OTH":   "Other symptoms, signs and abnormal clinical and laboratory findings (remainder of R00-R99)",
-    "V01-Y89":  "External causes of morbidity and mortality (V01-Y89)",
-    "ACC":      "Accidents (V01-X59, Y85, Y86)",
-    "V_Y85":    "Transport accidents (V01-V99, Y85)",
-    "ACC_OTH":  "Other accidents (W20-W64, W75-X39, X50-X59, Y86)",
-    "W00-W19":  "Falls",
-    "W65-W74":  "Accidental drowning and submersion",
-    "X60-X84_Y870": "Intentional self-harm",
-    "X40-X49":  "Accidental poisoning by and exposure to noxious substances",
-    "X85-Y09_Y871": "Assault",
-    "Y10-Y34_Y872": "Event of undetermined intent",
-    "V01-Y89_OTH":  "Other external causes of morbidity and mortality (remainder of V01-Y89)"
+    "TOTAL":            "Total",
+    "A_B":              "Certain infectious and parasitic diseases (A00-B99)",
+    "A15-A19_B90":      "Tuberculosis",
+    "B15-B19_B942":     "Viral hepatitis and sequelae of viral hepatitis",
+    "B180-B182":        "Chronic viral hepatitis B and C",
+    "B20-B24":          "Human immunodeficiency virus [HIV] disease",
+    "A_B_OTH":          "Other infectious and parasitic diseases (remainder of A00-B99)",
+    "C00-D48":          "Neoplasms",
+    "C":                "Malignant neoplasms (C00-C97)",
+    "C00-C14":          "Malignant neoplasm of lip, oral cavity, pharynx",
+    "C15":              "Malignant neoplasm of oesophagus",
+    "C16":              "Malignant neoplasm of stomach",
+    "C18-C21":          "Malignant neoplasm of colon, rectosigmoid junction, rectum, anus and anal canal",
+    "C22":              "Malignant neoplasm of liver and intrahepatic bile ducts",
+    "C25":              "Malignant neoplasm of pancreas",
+    "C32":              "Malignant neoplasm of larynx",
+    "C33_C34":          "Malignant neoplasm of trachea, bronchus and lung",
+    "C43":              "Malignant melanoma of skin",
+    "C50":              "Malignant neoplasm of breast",
+    "C53":              "Malignant neoplasm of cervix uteri",
+    "C54_C55":          "Malignant neoplasm of other parts of uterus",
+    "C56":              "Malignant neoplasm of ovary",
+    "C61":              "Malignant neoplasm of prostate",
+    "C64":              "Malignant neoplasm of kidney, except renal pelvis",
+    "C67":              "Malignant neoplasm of bladder",
+    "C70-C72":          "Malignant neoplasm of brain and central nervous system",
+    "C73":              "Malignant neoplasm of thyroid gland",
+    "C81-C86":          "Hodgkin disease and lymphomas",
+    "C88_C90_C96":      "Other malignant neoplasm of lymphoid, haematopoietic and related tissue",
+    "C91-C95":          "Leukaemia",
+    "C_OTH":            "Other malignant neoplasms (remainder of C00-C97)",
+    "D00-D48":          "Non-malignant neoplasms (benign and uncertain)",
+    "D50-D89":          "Diseases of the blood and blood-forming organs and certain disorders involving the immune mechanism",
+    "E":                "Endocrine, nutritional and metabolic diseases (E00-E90)",
+    "E10-E14":          "Diabetes mellitus",
+    "E_OTH":            "Other endocrine, nutritional and metabolic diseases (remainder of E00-E90)",
+    "F":                "Mental and behavioural disorders (F00-F99)",
+    "F01_F03":          "Dementia",
+    "F10":              "Mental and behavioural disorders due to use of alcohol",
+    "TOXICO":           "Drug dependence, toxicomania (F11-F16, F18-F19)",
+    "F_OTH":            "Other mental and behavioural disorders (remainder of F00-F99)",
+    "G_H":              "Diseases of the nervous system and the sense organs (G00-H95)",
+    "G20":              "Parkinson disease",
+    "G30":              "Alzheimer disease",
+    "G_H_OTH":          "Other diseases of the nervous system and the sense organs (remainder of G00-H95)",
+    "I":                "Diseases of the circulatory system (I00-I99)",
+    "I20-I25":          "Ischaemic heart diseases",
+    "I21_I22":          "Acute myocardial infarction including subsequent myocardial infarction",
+    "I20_I23-I25":      "Other ischaemic heart diseases",
+    "I30-I51":          "Other heart diseases",
+    "I60-I69":          "Cerebrovascular diseases",
+    "I_OTH":            "Other diseases of the circulatory system (remainder of I00-I99)",
+    "J":                "Diseases of the respiratory system (J00-J99)",
+    "J09-J11":          "Influenza (including swine flu)",
+    "J12-J18":          "Pneumonia",
+    "J40-J47":          "Chronic lower respiratory diseases",
+    "J45_J46":          "Asthma and status asthmaticus",
+    "J40-J44_J47":      "Other lower respiratory diseases",
+    "J_OTH":            "Other diseases of the respiratory system (remainder of J00-J99)",
+    "K":                "Diseases of the digestive system (K00-K93)",
+    "K25-K28":          "Ulcer of stomach, duodenum and jejunum",
+    "K70_K73_K74":      "Chronic liver disease",
+    "K_OTH":            "Other diseases of the digestive system (remainder of K00-K93)",
+    "L":                "Diseases of the skin and subcutaneous tissue (L00-L99)",
+    "M":                "Diseases of the musculoskeletal system and connective tissue (M00-M99)",
+    "RHEUM_ARTHRO":     "Rheumatoid arthritis and arthrosis (M05-M06,M15-M19)",
+    "M_OTH":            "Other diseases of the musculoskeletal system and connective tissue (remainder of M00-M99)",
+    "N":                "Diseases of the genitourinary system (N00-N99)",
+    "N00-N29":          "Diseases of kidney and ureter",
+    "N_OTH":            "Other diseases of the genitourinary system (remainder of N00-N99)",
+    "O":                "Pregnancy, childbirth and the puerperium (O00-O99)",
+    "P":                "Certain conditions originating in the perinatal period (P00-P96)",
+    "Q":                "Congenital malformations, deformations and chromosomal abnormalities (Q00-Q99)",
+    "R":                "Symptoms, signs and abnormal clinical and laboratory findings, not elsewhere classified (R00-R99)",
+    "R95":              "Sudden infant death syndrome",
+    "R96-R99":          "Ill-defined and unknown causes of mortality",
+    "R_OTH":            "Other symptoms, signs and abnormal clinical and laboratory findings (remainder of R00-R99)",
+    "V01-Y89":          "External causes of morbidity and mortality (V01-Y89)",
+    "ACC":              "Accidents (V01-X59, Y85, Y86)",
+    "V_Y85":            "Transport accidents (V01-V99, Y85)",
+    "ACC_OTH":          "Other accidents (W20-W64, W75-X39, X50-X59, Y86)",
+    "W00-W19":          "Falls",
+    "W65-W74":          "Accidental drowning and submersion",
+    "X60-X84_Y870":     "Intentional self-harm",
+    "X40-X49":          "Accidental poisoning by and exposure to noxious substances",
+    "X85-Y09_Y871":     "Assault",
+    "Y10-Y34_Y872":     "Event of undetermined intent",
+    "V01-Y89_OTH":      "Other external causes of morbidity and mortality (remainder of V01-Y89)"
 }
 
 # Reverse map for lookup
@@ -88,8 +128,8 @@ REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     url = (
-        f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/"
-        f"{dataset_id}?format=TSV&compressed=true"
+        f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/
+        2.1/data/{dataset_id}?format=TSV&compressed=true"
     )
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
@@ -194,16 +234,16 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
         sy, ey = int(yrs[seg].min()), int(yrs[seg].max())
         seg_vals = vals[seg]
         if len(seg_vals) < 2 or np.all(np.isnan(seg_vals)):
-            recs.append({"start_year":sy,"end_year":ey,"slope":np.nan,"APC_pct":np.nan})
+            recs.append({"start_year": sy, "end_year": ey, "slope": np.nan, "APC_pct": np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc   = (slope / np.nanmean(seg_vals)) * 100
-            recs.append({"start_year":sy,"end_year":ey,"slope":slope,"APC_pct":apc})
+            apc = (slope / np.nanmean(seg_vals)) * 100
+            recs.append({"start_year": sy, "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
 
 def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
-    sub = df[(df["Country"]==country)&(df["Cause"]==cause)].sort_values("Year")
+    sub = df[(df["Country"] == country) & (df["Cause"] == cause)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
     fig = px.line(
         sub, x="Year", y="Rate",
@@ -216,9 +256,9 @@ def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
 
 
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
-    dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
+    dfp = df_sub[["Year", "Rate"]].rename(columns={"Year": "ds", "Rate": "y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
-    m = Prophet(yearly_seasonality=False,daily_seasonality=False)
+    m = Prophet(yearly_seasonality=False, daily_seasonality=False)
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
@@ -237,21 +277,21 @@ def main():
     df["CauseFull"] = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
     countries = sorted(df["Country"].unique())
-    country   = st.sidebar.selectbox("Country", countries)
+    country = st.sidebar.selectbox("Country", countries)
 
-    causes_full = sorted(df[df["Country"]==country]["CauseFull"].unique())
-    cause_full  = st.sidebar.selectbox("Cause of Death", causes_full)
+    causes_full = sorted(df[df["Country"] == country]["CauseFull"].unique())
+    cause_full = st.sidebar.selectbox("Cause of Death", causes_full)
 
     # Reverse lookup code from full name, fallback to full name itself
     cause_code = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
-    yrs        = sorted(df["Year"].unique())
-    y0, y1     = int(yrs[0]), int(yrs[-1])
+    yrs = sorted(df["Year"].unique())
+    y0, y1 = int(yrs[0]), int(yrs[-1])
     year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
-        (df["Country"]==country)&
-        (df["Cause"]  ==cause_code)&
+        (df["Country"] == country) &
+        (df["Cause"] == cause_code) &
         (df["Year"].between(*year_range))
     ]
 
