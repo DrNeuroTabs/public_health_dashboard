@@ -29,7 +29,6 @@ EU_CODES = [
     "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
 ]
 
-# —————————————————————————————————————————————————————————————————————————————
 # Map of Disease Codes → Full Descriptions
 CAUSE_NAME_MAP = {
     "F_OTH":    "Other mental and behavioural disorders (remainder of F00-F99)",
@@ -82,7 +81,10 @@ CAUSE_NAME_MAP = {
     "V01-Y89_OTH":  "Other external causes of morbidity and mortality (remainder of V01-Y89)"
 }
 
-# —————————————————————————————————————————————————————————————————————————————
+# Reverse map for lookup
+REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
+
+
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     url = (
@@ -131,11 +133,13 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     sub = long[mask].copy().rename(columns={"icd10": "Cause", "geo": "Region"})
     return sub[["Region", "Year", "Cause", "Rate"]]
 
+
 @st.cache_data
 def load_historical_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr")
     df = df.rename(columns={"Region": "Country"})
     return df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+
 
 @st.cache_data
 def load_modern_rates() -> pd.DataFrame:
@@ -145,6 +149,7 @@ def load_modern_rates() -> pd.DataFrame:
     df_ctry = df_ctry.rename(columns={"Region": "Country"})
     return df_ctry.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
+
 @st.cache_data
 def load_data() -> pd.DataFrame:
     hist = load_historical_rates()
@@ -152,18 +157,21 @@ def load_data() -> pd.DataFrame:
     df   = pd.concat([hist, mod], ignore_index=True)
     df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
+    # EU aggregate
     df_eu = (
         df[df["Country"].isin(EU_CODES)]
         .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
     df_eu["Country"] = "EU"
 
+    # Europe aggregate
     df_eur = (
         df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
     df_eur["Country"] = "Europe"
 
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
+
 
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     clean = ts.dropna()
@@ -174,6 +182,7 @@ def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
         return algo.predict(pen=pen)
     except BadSegmentationParameters:
         return []
+
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
     df_s = df_sub.sort_values("Year")
@@ -192,14 +201,19 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year":sy,"end_year":ey,"slope":slope,"APC_pct":apc})
     return pd.DataFrame(recs)
 
+
 def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
     sub = df[(df["Country"]==country)&(df["Cause"]==cause)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
-    fig = px.line(sub, x="Year", y="Rate", title=f"{CAUSE_NAME_MAP.get(cause, cause)} Mortality Rate in {country}")
+    fig = px.line(
+        sub, x="Year", y="Rate",
+        title=f"{CAUSE_NAME_MAP.get(cause, cause)} Mortality Rate in {country}"
+    )
     for cp in cps:
         if 0 < cp < len(sub):
             fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
     st.plotly_chart(fig)
+
 
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
@@ -208,7 +222,10 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
-    st.plotly_chart(px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate"))
+    st.plotly_chart(
+        px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate")
+    )
+
 
 def main():
     st.set_page_config(layout="wide", page_title="Mortality Rates 1994–Present")
@@ -216,27 +233,25 @@ def main():
 
     df = load_data()
 
-    # Build a list of display names for causes
+    # Build a column of full cause names
     df["CauseFull"] = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
     countries = sorted(df["Country"].unique())
     country   = st.sidebar.selectbox("Country", countries)
 
-    # Use the full names in the selectbox
-    causes    = sorted(df[df["Country"]==country]["CauseFull"].unique())
-    cause_full = st.sidebar.selectbox("Cause of Death", causes)
+    causes_full = sorted(df[df["Country"]==country]["CauseFull"].unique())
+    cause_full  = st.sidebar.selectbox("Cause of Death", causes_full)
 
-    # Map the chosen full name back to its code for filtering
-    # (we assume every full name is unique)
-    cause_code = next(code for code, name in CAUSE_NAME_MAP.items() if name == cause_full)
+    # Reverse lookup code from full name, fallback to full name itself
+    cause_code = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
     yrs        = sorted(df["Year"].unique())
     y0, y1     = int(yrs[0]), int(yrs[-1])
     year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
-        (df["Country"]==country) &
-        (df["Cause"]  == cause_code) &
+        (df["Country"]==country)&
+        (df["Cause"]  ==cause_code)&
         (df["Year"].between(*year_range))
     ]
 
@@ -246,8 +261,7 @@ def main():
     else:
         plot_joinpoints(df_f, country, cause_code)
         st.markdown("### Joinpoint & Annual Percent Change (APC)")
-        apc_df = compute_joinpoints_and_apc(df_f)
-        st.dataframe(apc_df, use_container_width=True)
+        st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
         st.markdown("### Forecast Next 10 Years")
         forecast_mortality(df_f)
 
@@ -256,6 +270,7 @@ def main():
         "Data combined from national (1994–2010) and NUTS2 (2011–present) series; "
         "EU and Europe aggregates appended as simple means."
     )
+
 
 if __name__ == "__main__":
     main()
