@@ -21,33 +21,40 @@ import pycountry
 #   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels scikit-learn pycountry
 #
 # Dashboard for standardised-death-rate data:
-#  • joinpoint & APC analysis
-#  • segmented fits overlay
-#  • forecasting (Prophet, ARIMA, ETS, Ensemble)
-#  • data-driven clustering + map
+#  • joinpoint & APC analysis (single & comparative by sex)
+#  • segmented-linear-fit overlays
+#  • forecasting (Prophet, ARIMA, ETS, Ensemble) per sex
+#  • data-driven clustering + map (on total rates)
 # --------------------------------------------------------------------------
 
 EU_CODES = ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
             "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"]
 
+SEX_NAME_MAP = {"T": "Total", "M": "Male", "F": "Female"}
+# reverse lookup
+REV_SEX_NAME = {v: k for k, v in SEX_NAME_MAP.items()}
+
 # Disease code → full description
 CAUSE_NAME_MAP = {
     "TOTAL":"Total",
     "A_B":"Certain infectious and parasitic diseases (A00-B99)",
-    # … include all your mappings here …
+    # … include all mappings …
     "U072":"COVID-19, virus not identified"
 }
-REV_CAUSE_NAME_MAP = {v:k for k,v in CAUSE_NAME_MAP.items()}
+REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 
 # Country code ↔ full name
-COUNTRY_NAME_MAP = {c.alpha_2:c.name for c in pycountry.countries}
+COUNTRY_NAME_MAP = {c.alpha_2: c.name for c in pycountry.countries}
 COUNTRY_NAME_MAP.update({"FX":"France (Metropolitan)","EU":"European Union","Europe":"Europe"})
-REV_COUNTRY_NAME_MAP = {v:k for k,v in COUNTRY_NAME_MAP.items()}
+REV_COUNTRY_NAME_MAP = {v: k for k, v in COUNTRY_NAME_MAP.items()}
 
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
-    url = f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
+    url = (
+        f"https://ec.europa.eu/eurostat/api/dissemination/"
+        f"sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
+    )
     resp = requests.get(url, timeout=30); resp.raise_for_status()
     buf = BytesIO(resp.content)
     with gzip.GzipFile(fileobj=buf) as gz:
@@ -55,156 +62,189 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
 
     key_col = raw.columns[0]
     dims = key_col.split("\\")[0].split(",")
-    raw = raw.rename(columns={key_col:"series_keys"})
+    raw = raw.rename(columns={key_col: "series_keys"})
     keys = raw["series_keys"].str.split(",", expand=True)
     keys.columns = dims
-    df = pd.concat([keys, raw.drop(columns=["series_keys"])],axis=1)
+    df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
 
-    years = [c for c in df.columns if c not in dims]
-    long = df.melt(id_vars=dims, value_vars=years, var_name="Year", value_name="raw_rate")
+    year_cols = [c for c in df.columns if c not in dims]
+    long = df.melt(
+        id_vars=dims,
+        value_vars=year_cols,
+        var_name="Year",
+        value_name="raw_rate"
+    )
     long["Year"] = long["Year"].str.strip().astype(int)
-    long["Rate"] = pd.to_numeric(long["raw_rate"].str.strip().replace(":",np.nan), errors="coerce")
+    long["Rate"] = pd.to_numeric(
+        long["raw_rate"].str.strip().replace(":", np.nan),
+        errors="coerce"
+    )
 
     units = long["unit"].unique()
     unit_val = "RT" if "RT" in units else ("NR" if "NR" in units else None)
     mask = pd.Series(True, index=long.index)
-    if unit_val: mask &= (long["unit"]==unit_val)
-    mask &= (long.get("freq")=="A") & (long.get("sex")=="T") & (long.get("age")=="TOTAL")
-    if "resid" in long.columns: mask &= (long["resid"]=="TOT_IN")
+    if unit_val:
+        mask &= long["unit"] == unit_val
+    mask &= (long.get("freq") == "A") & (long.get("age") == "TOTAL")
+    # keep all sexes now
+    if "resid" in long.columns:
+        mask &= long["resid"] == "TOT_IN"
 
-    sub = long[mask].copy().rename(columns={"geo":"Region","icd10":"Cause"})
-    return sub[["Region","Year","Cause","Rate"]]
+    sub = long[mask].copy().rename(
+        columns={"geo": "Region", "icd10": "Cause", "sex": "Sex"}
+    )
+    return sub[["Region", "Year", "Cause", "Sex", "Rate"]]
 
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
     def ld(ds):
-        return load_eurostat_series(ds).rename(columns={"Region":"Country"}).dropna(subset=["Rate"])
+        return load_eurostat_series(ds)\
+            .rename(columns={"Region": "Country"})\
+            .dropna(subset=["Rate"])
     hist = ld("hlth_cd_asdr")
     mod  = ld("hlth_cd_asdr2")
     mod  = mod[mod["Country"].str.fullmatch(r"[A-Z]{2}")]
-    df   = pd.concat([hist,mod],ignore_index=True).sort_values(["Country","Cause","Year"])
-    df_eu = df[df["Country"].isin(EU_CODES)].groupby(["Year","Cause"],as_index=False)["Rate"].mean()
-    df_eu["Country"]="EU"
-    df_eur= df.groupby(["Year","Cause"],as_index=False)["Rate"].mean()
-    df_eur["Country"]="Europe"
-    return pd.concat([df,df_eu,df_eur],ignore_index=True)
+    df   = pd.concat([hist, mod], ignore_index=True).sort_values(["Country","Cause","Sex","Year"])
+
+    # EU and Europe aggregates by sex
+    df_eu = (
+        df[df["Country"].isin(EU_CODES)]
+        .groupby(["Year","Cause","Sex"], as_index=False)["Rate"]
+        .mean()
+    )
+    df_eu["Country"] = "EU"
+    df_eur = (
+        df.groupby(["Year","Cause","Sex"], as_index=False)["Rate"]
+        .mean()
+    )
+    df_eur["Country"] = "Europe"
+
+    return pd.concat([df, df_eu, df_eur], ignore_index=True)
 
 
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     clean = ts.dropna()
-    if len(clean)<2: return []
+    if len(clean) < 2:
+        return []
     algo = rpt.Pelt(model="l2").fit(clean.values)
-    try: return algo.predict(pen=pen)
-    except BadSegmentationParameters: return []
+    try:
+        return algo.predict(pen=pen)
+    except BadSegmentationParameters:
+        return []
 
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
-    df_s = df_sub.sort_values("Year")
-    yrs, vals = df_s["Year"].values, df_s["Rate"].values
-    bkps = detect_change_points(df_s["Rate"])[:-1]
-    segs = np.split(np.arange(len(yrs)), bkps) if bkps else [np.arange(len(yrs))]
-    recs=[]
-    for seg in segs:
-        sy,ey = int(yrs[seg].min()), int(yrs[seg].max())
-        seg_vals = vals[seg]
-        if len(seg_vals)<2 or np.all(np.isnan(seg_vals)):
-            recs.append({"start_year":sy,"end_year":ey,"slope":np.nan,"APC_pct":np.nan})
-        else:
-            slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc   = (slope/np.nanmean(seg_vals))*100
-            recs.append({"start_year":sy,"end_year":ey,"slope":slope,"APC_pct":apc})
+    recs = []
+    for sex in df_sub["Sex"].unique():
+        part = df_sub[df_sub["Sex"] == sex].sort_values("Year")
+        yrs = part["Year"].values; vals = part["Rate"].values
+        bkps = detect_change_points(part["Rate"])[:-1]
+        segs = np.split(np.arange(len(yrs)), bkps) if bkps else [np.arange(len(yrs))]
+        for seg in segs:
+            sy, ey = int(yrs[seg].min()), int(yrs[seg].max())
+            seg_vals = vals[seg]
+            if len(seg_vals) < 2 or np.all(np.isnan(seg_vals)):
+                recs.append({"Sex": SEX_NAME_MAP[sex], "start_year": sy, "end_year": ey,
+                             "slope": np.nan, "APC_pct": np.nan})
+            else:
+                slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
+                apc = (slope / np.nanmean(seg_vals)) * 100
+                recs.append({"Sex": SEX_NAME_MAP[sex], "start_year": sy,
+                             "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
 
-def plot_joinpoints(df, c_code, cause_code, c_full, cause_full):
-    sub = df[(df["Country"]==c_code)&(df["Cause"]==cause_code)].sort_values("Year")
-    cps = detect_change_points(sub["Rate"])
-    fig = px.line(sub, x="Year", y="Rate", title=f"{cause_full} in {c_full}")
-    for cp in cps:
-        if 0<cp<len(sub): fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
+def plot_joinpoints_comparative(df_sub: pd.DataFrame, title: str):
+    df_sub["SexFull"] = df_sub["Sex"].map(SEX_NAME_MAP)
+    fig = px.line(
+        df_sub, x="Year", y="Rate", color="SexFull", markers=True,
+        title=title
+    )
     st.plotly_chart(fig)
 
 
-def plot_segmented_fit(df, c_code, cause_code, c_full, cause_full):
-    sub = df[(df["Country"]==c_code)&(df["Cause"]==cause_code)].sort_values("Year")
-    yrs = sub["Year"].values; rates = sub["Rate"].values
-    bkps = detect_change_points(sub["Rate"])[:-1]
+def plot_segmented_fit_series(df_sub: pd.DataFrame, title: str):
+    df_sub = df_sub.sort_values("Year")
+    yrs = df_sub["Year"].values; rates = df_sub["Rate"].values
+    bkps = detect_change_points(df_sub["Rate"])[:-1]
     segs = np.split(np.arange(len(yrs)), bkps) if bkps else [np.arange(len(yrs))]
     fig = go.Figure()
-    # scatter original
     fig.add_trace(go.Scatter(x=yrs, y=rates, mode="markers+lines", name="Data"))
-    # colors
     palette = px.colors.qualitative.Dark24
     for i, seg in enumerate(segs):
-        idx = yrs[seg]
-        vals = rates[seg]
-        if len(vals)>=2 and not np.all(np.isnan(vals)):
-            model = sm.OLS(vals, sm.add_constant(idx)).fit()
-            fit = model.params[0] + model.params[1]*idx
+        idx = yrs[seg]; vals = rates[seg]
+        if len(vals) >= 2 and not np.all(np.isnan(vals)):
+            fit = sm.OLS(vals, sm.add_constant(idx)).fit().predict(sm.add_constant(idx))
             fig.add_trace(go.Scatter(
                 x=idx, y=fit, mode="lines",
                 line=dict(color=palette[i % len(palette)], width=3),
                 name=f"Segment {i+1}"
             ))
-    fig.update_layout(title=f"{cause_full} Segmented Fit in {c_full}",
-                      xaxis_title="Year", yaxis_title="Rate")
+    fig.update_layout(title=title, xaxis_title="Year", yaxis_title="Rate")
     st.plotly_chart(fig)
 
 
-def get_prophet_forecast(df_sub, periods):
+def get_prophet_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
-    dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str),format="%Y")
-    m = Prophet(yearly_seasonality=False,daily_seasonality=False)
+    dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
+    m = Prophet(yearly_seasonality=False, daily_seasonality=False)
     m.fit(dfp)
-    fut = m.make_future_dataframe(periods=periods,freq="Y")
+    fut = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(fut)
-    return pd.DataFrame({"Year":fc["ds"].dt.year,"Prophet":fc["yhat"]})
+    return pd.DataFrame({"Year":fc["ds"].dt.year, "Prophet":fc["yhat"]})
 
 
-def get_arima_forecast(df_sub, periods):
-    ser = df_sub.sort_values("Year").set_index("Year")["Rate"]
-    model = ARIMA(ser,order=(1,1,1))
-    res = model.fit(); preds = res.forecast(periods)
+def get_arima_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
+    ser = df_sub.set_index("Year")["Rate"]
+    model = ARIMA(ser, order=(1,1,1))
+    res = model.fit()
+    preds = res.forecast(periods)
     years = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
-    return pd.DataFrame({"Year":years,"ARIMA":preds.values})
+    return pd.DataFrame({"Year":years, "ARIMA":preds.values})
 
 
-def get_ets_forecast(df_sub, periods):
-    ser = df_sub.sort_values("Year").set_index("Year")["Rate"]
-    model = ExponentialSmoothing(ser,trend="add",seasonal=None).fit(optimized=True)
-    preds = model.forecast(periods)
+def get_ets_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
+    ser = df_sub.set_index("Year")["Rate"]
+    m = ExponentialSmoothing(ser, trend="add", seasonal=None).fit(optimized=True)
+    preds = m.forecast(periods)
     years = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
-    return pd.DataFrame({"Year":years,"ETS":preds.values})
+    return pd.DataFrame({"Year":years, "ETS":preds.values})
 
 
-def forecast_mortality(df_sub, periods, method):
+def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str, title: str):
     n = df_sub["Rate"].dropna().shape[0]
-    if n<3:
-        st.warning(f"Not enough data ({n} pts) to forecast."); return
-    prop = get_prophet_forecast(df_sub,periods)
-    ari  = get_arima_forecast(df_sub,periods)
-    ets  = get_ets_forecast(df_sub,periods)
-    fc = prop.merge(ari,on="Year").merge(ets,on="Year")
-    if method=="Prophet": fc["Forecast"]=fc["Prophet"]
-    elif method=="ARIMA": fc["Forecast"]=fc["ARIMA"]
-    elif method=="ETS":   fc["Forecast"]=fc["ETS"]
-    else:                 fc["Forecast"]=fc[["Prophet","ARIMA","ETS"]].mean(axis=1)
+    if n < 3:
+        st.warning(f"Not enough data ({n} points) to forecast.")
+        return
+    prop = get_prophet_forecast(df_sub, periods)
+    ari  = get_arima_forecast(df_sub, periods)
+    ets  = get_ets_forecast(df_sub, periods)
+    fc = prop.merge(ari, on="Year").merge(ets, on="Year")
+    if method == "Prophet":
+        fc["Forecast"] = fc["Prophet"]
+    elif method == "ARIMA":
+        fc["Forecast"] = fc["ARIMA"]
+    elif method == "ETS":
+        fc["Forecast"] = fc["ETS"]
+    else:
+        fc["Forecast"] = fc[["Prophet","ARIMA","ETS"]].mean(axis=1)
     hist = df_sub[["Year","Rate"]].rename(columns={"Rate":"History"})
-    combined = hist.merge(fc[["Year","Forecast"]],on="Year",how="outer")
-    fig = px.line(combined,x="Year",y=["History","Forecast"],
-                  title=f"{method} Forecast ({periods} yrs)")
+    combined = hist.merge(fc[["Year","Forecast"]], on="Year", how="outer")
+    fig = px.line(combined, x="Year", y=["History","Forecast"], title=title)
     st.plotly_chart(fig)
 
 
 def main():
-    st.set_page_config(layout="wide",page_title="Mortality Dashboard")
-    st.title("Standardised Mortality Rates (1994–Present)")
+    st.set_page_config(layout="wide", page_title="Mortality Dashboard")
+    st.title("Standardised Mortality Rates (1994–Present) by Country")
 
     df = load_data()
-    df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP).fillna(df["Country"])
-    df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
+    df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP)
+    df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP)
+    df["SexFull"]     = df["Sex"].map(SEX_NAME_MAP)
 
+    # Sidebar selectors
     country_full = st.sidebar.selectbox("Country", sorted(df["CountryFull"].unique()))
     country_code = REV_COUNTRY_NAME_MAP.get(country_full, country_full)
 
@@ -214,72 +254,107 @@ def main():
     )
     cause_code = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
-    yrs = sorted(df["Year"].unique()); y0,y1 = yrs[0],yrs[-1]
-    year_range = st.sidebar.slider("Historical Years", y0, y1, (y0,y1))
+    sex_sel = st.sidebar.multiselect(
+        "Sex", ["Total","Male","Female"], default=["Total"]
+    )
+    sex_codes = [REV_SEX_NAME[s] for s in sex_sel]
 
-    forecast_years = st.sidebar.slider("Forecast Horizon (yrs)",1,30,10)
-    method = st.sidebar.selectbox("Forecast Method",["Prophet","ARIMA","ETS","Ensemble"])
+    yrs = sorted(df["Year"].unique())
+    y0, y1 = yrs[0], yrs[-1]
+    year_range = st.sidebar.slider("Historical Years", y0, y1, (y0, y1))
 
+    forecast_years = st.sidebar.slider("Forecast Horizon (yrs)", 1, 30, 10)
+    method = st.sidebar.selectbox("Forecast Method", ["Prophet","ARIMA","ETS","Ensemble"])
+
+    # Filtered data
     df_f = df[
         (df["Country"]==country_code)&
-        (df["Cause"]  ==cause_code)&
+        (df["Cause"]==cause_code)&
+        (df["Sex"].isin(sex_codes))&
         (df["Year"].between(*year_range))
     ]
 
     st.header(f"{cause_full} in {country_full} ({year_range[0]}–{year_range[1]})")
     if df_f.empty:
-        st.warning("No data available for selected filters.")
+        st.warning("No data for selected filters.")
+        return
+
+    # 1) Joinpoint plot (single or comparative)
+    st.markdown("### Joinpoint Trend")
+    title_jp = f"{cause_full} in {country_full}"
+    if len(sex_codes) == 1:
+        plot_joinpoints(df_f, country_code, cause_code, country_full, sex_sel[0])
     else:
-        # joinpoint plot
-        plot_joinpoints(df_f, country_code, cause_code, country_full, cause_full)
-        # segmented fit
-        st.markdown("### Segmented Linear Fits")
-        plot_segmented_fit(df, country_code, cause_code, country_full, cause_full)
-        # APC table
-        st.markdown("### Joinpoint & Annual Percent Change (APC)")
-        st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
-        # forecasting
-        st.markdown(f"### Forecast next {forecast_years} yrs ({method})")
-        forecast_mortality(df_f, forecast_years, method)
-        # clustering
-        st.markdown("---")
-        st.header("Cluster Analysis")
-        df_cl = df[(df["Cause"]==cause_code)&(df["Year"].between(*year_range))]
-        pivot = df_cl.pivot(index="Country",columns="Year",values="Rate")
-        pivot = (pivot.interpolate(axis=1,limit_direction="both")
-                      .ffill(axis=1).bfill(axis=1)
-                      .dropna(axis=0,how="all"))
-        if pivot.shape[0]<3:
-            st.warning("Not enough countries with data to perform clustering.")
-        else:
-            X = pivot.values
-            max_k = min(10, X.shape[0]-1)
-            sil_scores = {}
-            for k in range(2, max_k+1):
-                labels = KMeans(n_clusters=k, random_state=0).fit_predict(X)
-                sil_scores[k] = silhouette_score(X, labels)
-            sil_df = pd.Series(sil_scores, name="silhouette_score").to_frame()
-            st.write("Silhouette scores by #clusters:", sil_df)
-            fig_sil = px.line(sil_df, x=sil_df.index, y="silhouette_score",
-                              labels={"index":"# clusters"},
-                              title="Silhouette Score vs. # Clusters")
-            st.plotly_chart(fig_sil)
-            best_k = max(sil_scores, key=sil_scores.get)
-            st.write(f"Optimal k (data-driven): **{best_k}**")
-            km = KMeans(n_clusters=best_k, random_state=0).fit(X)
-            clust_df = pd.DataFrame({"Country":pivot.index, "Cluster":km.labels_.astype(str)})
-            clust_df["CountryFull"] = clust_df["Country"].map(COUNTRY_NAME_MAP)
-            clust_df["iso_alpha"] = clust_df["Country"].map(
-                lambda c: pycountry.countries.get(alpha_2=c).alpha_3 if pycountry.countries.get(alpha_2=c) else None
-            )
-            fig_map = px.choropleth(clust_df, locations="iso_alpha", color="Cluster",
-                                    hover_name="CountryFull", locationmode="ISO-3",
-                                    scope="europe", title=f"{cause_full} Clusters (k={best_k})")
-            st.plotly_chart(fig_map)
+        plot_joinpoints_comparative(df_f, title_jp + " by Sex")
+
+    # 2) Segmented fits
+    st.markdown("### Segmented Linear Fits")
+    if len(sex_codes) == 1:
+        plot_segmented_fit_series(df_f, f"{cause_full} ({sex_sel[0]}) Segmented Fit")
+    else:
+        for sex_code, sex_full in zip(sex_codes, sex_sel):
+            sub = df_f[df_f["Sex"]==sex_code]
+            plot_segmented_fit_series(sub, f"{cause_full} ({sex_full}) Segmented Fit")
+
+    # 3) APC table
+    st.markdown("### Joinpoint & Annual Percent Change (APC)")
+    apc_df = compute_joinpoints_and_apc(df_f)
+    st.dataframe(apc_df, use_container_width=True)
+
+    # 4) Forecasting
+    st.markdown(f"### Forecast next {forecast_years} yrs ({method})")
+    if len(sex_codes) == 1:
+        forecast_mortality(df_f, forecast_years, method,
+                           f"{cause_full} ({sex_sel[0]}) Forecast")
+    else:
+        for sex_code, sex_full in zip(sex_codes, sex_sel):
+            sub = df_f[df_f["Sex"]==sex_code]
+            forecast_mortality(sub, forecast_years, method,
+                               f"{cause_full} ({sex_full}) Forecast")
+
+    # 5) Cluster analysis (always on Total)
+    st.markdown("---")
+    st.header("Cluster Analysis (Total Rates)")
+    df_cl = df[
+        (df["Cause"]==cause_code)&
+        (df["Sex"]=="T")&
+        (df["Year"].between(*year_range))
+    ]
+    pivot = df_cl.pivot(index="Country", columns="Year", values="Rate")
+    pivot = (pivot.interpolate(axis=1,limit_direction="both")
+                  .ffill(axis=1).bfill(axis=1)
+                  .dropna(axis=0,how="all"))
+    if pivot.shape[0] < 3:
+        st.warning("Not enough countries with total data to cluster.")
+    else:
+        X = pivot.values
+        max_k = min(10, X.shape[0]-1)
+        sil_scores = {k: silhouette_score(X, KMeans(n_clusters=k,random_state=0).fit_predict(X))
+                      for k in range(2, max_k+1)}
+        sil_df = pd.Series(sil_scores,name="silhouette_score").to_frame()
+        st.write("Silhouette scores by # clusters:", sil_df)
+        fig_sil = px.line(sil_df, x=sil_df.index, y="silhouette_score",
+                          labels={"index":"# clusters"},
+                          title="Silhouette Score vs. # Clusters")
+        st.plotly_chart(fig_sil)
+        best_k = max(sil_scores, key=sil_scores.get)
+        st.write(f"Optimal k (data-driven): **{best_k}**")
+        km = KMeans(n_clusters=best_k, random_state=0).fit(X)
+        clust_df = pd.DataFrame({"Country": pivot.index, "Cluster": km.labels_.astype(str)})
+        clust_df["CountryFull"] = clust_df["Country"].map(COUNTRY_NAME_MAP)
+        clust_df["iso_alpha"] = clust_df["Country"].map(
+            lambda c: pycountry.countries.get(alpha_2=c).alpha_3
+                      if pycountry.countries.get(alpha_2=c) else None
+        )
+        fig_map = px.choropleth(
+            clust_df, locations="iso_alpha", color="Cluster",
+            hover_name="CountryFull", locationmode="ISO-3",
+            scope="europe", title=f"{cause_full} Clusters (k={best_k})"
+        )
+        st.plotly_chart(fig_map)
 
     st.markdown("---")
-    st.info("Joinpoints, segmented fits, forecasting (Prophet/ARIMA/ETS), and silhouette-driven clustering included.")
+    st.info("Select sex(es) above; clustering is always on total rates; forecasting per sex; joinpoints & APC by sex.")
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
