@@ -15,10 +15,10 @@ import pycountry
 # Requirements:
 #   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels pycountry
 #
-# This dashboard stitches together national standardised-death-rate data:
+# This dashboard stitches together national standardised‐death‐rate data:
 #  • hlth_cd_asdr   (1994–2010 national rates, unit="RT")
 #  • hlth_cd_asdr2  (2011–present NUTS2 rates, unit="NR"), filtering
-#                   only the country-level codes (length==2)
+#                   only the country‐level codes (length==2)
 # Then it appends two aggregated series:
 #  • "EU"     – simple average across the 27 EU member states
 #  • "Europe" – simple average across all countries present
@@ -129,9 +129,11 @@ REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 
 # ISO2 → full country name & reverse
 COUNTRY_NAME_MAP = {c.alpha_2: c.name for c in pycountry.countries}
+COUNTRY_NAME_MAP["FX"] = "France (Metropolitan)"
 COUNTRY_NAME_MAP["EU"] = "European Union"
 COUNTRY_NAME_MAP["Europe"] = "Europe"
 REV_COUNTRY_NAME_MAP = {v: k for k, v in COUNTRY_NAME_MAP.items()}
+
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
@@ -170,11 +172,13 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     sub = long[mask].copy().rename(columns={"icd10": "Cause", "geo": "Region"})
     return sub[["Region", "Year", "Cause", "Rate"]]
 
+
 @st.cache_data
 def load_historical_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr")
     df = df.rename(columns={"Region": "Country"})
     return df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+
 
 @st.cache_data
 def load_modern_rates() -> pd.DataFrame:
@@ -183,6 +187,7 @@ def load_modern_rates() -> pd.DataFrame:
     df_ctry = df[df["Region"].str.fullmatch(r"[A-Z]{2}")].copy()
     df_ctry = df_ctry.rename(columns={"Region": "Country"})
     return df_ctry.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
@@ -198,6 +203,7 @@ def load_data() -> pd.DataFrame:
 
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
 
+
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     clean = ts.dropna()
     if len(clean) < 2:
@@ -207,6 +213,7 @@ def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
         return algo.predict(pen=pen)
     except BadSegmentationParameters:
         return []
+
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
     df_s = df_sub.sort_values("Year")
@@ -225,6 +232,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year": sy, "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
+
 def plot_joinpoints(df: pd.DataFrame, country_code: str, cause_code: str, country_full: str, cause_full: str) -> None:
     sub = df[(df["Country"] == country_code) & (df["Cause"] == cause_code)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
@@ -233,6 +241,7 @@ def plot_joinpoints(df: pd.DataFrame, country_code: str, cause_code: str, countr
         if 0 < cp < len(sub):
             fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
     st.plotly_chart(fig)
+
 
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
@@ -243,6 +252,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     fc = m.predict(future)
     st.plotly_chart(px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate"))
 
+
 def main():
     st.set_page_config(layout="wide", page_title="Mortality Rates 1994–Present")
     st.title("Standardised Mortality Rates (1994–Present) by Country")
@@ -252,15 +262,15 @@ def main():
     df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
     countries_full = sorted(df["CountryFull"].unique())
-    country_full = st.sidebar.selectbox("Country", countries_full)
-    country_code = REV_COUNTRY_NAME_MAP.get(country_full, country_full)
+    country_full   = st.sidebar.selectbox("Country", countries_full)
+    country_code   = REV_COUNTRY_NAME_MAP.get(country_full, country_full)
 
-    causes_full = sorted(df[df["Country"] == country_code]["CauseFull"].unique())
-    cause_full  = st.sidebar.selectbox("Cause of Death", causes_full)
-    cause_code  = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
+    causes_full    = sorted(df[df["Country"] == country_code]["CauseFull"].unique())
+    cause_full     = st.sidebar.selectbox("Cause of Death", causes_full)
+    cause_code     = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
-    yrs = sorted(df["Year"].unique())
-    y0, y1 = int(yrs[0]), int(yrs[-1])
+    yrs      = sorted(df["Year"].unique())
+    y0, y1   = int(yrs[0]), int(yrs[-1])
     year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
