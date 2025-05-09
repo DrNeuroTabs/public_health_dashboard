@@ -16,14 +16,21 @@ import statsmodels.api as sm
 #
 # This dashboard stitches together national standardised‐death‐rate data:
 #  • hlth_cd_asdr   (1994–2010 national rates, unit="RT")
-#  • hlth_cd_asdr2  (2011–present NUTS 2 rates, unit="NR"), but filtered
-#                   for the country-level entries (geo codes length 2)
-# It then runs joinpoint analysis, APC calculations, and forecasting.
+#  • hlth_cd_asdr2  (2011–present NUTS2 rates, unit="NR"), filtering
+#                   only the country‐level codes (length==2)
+# Then it appends two aggregated series:
+#  • "EU"     – simple average across the 27 EU member states
+#  • "Europe" – simple average across all countries present
+# Finally runs joinpoint analysis, APC calc, and forecasting.
 # --------------------------------------------------------------------------
+
+EU_CODES = [
+    "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
+    "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+]
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
-    """Generic loader for any SDMX-TSV Eurostat series, dynamic on unit."""
     url = (
         f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/"
         f"{dataset_id}?format=TSV&compressed=true"
@@ -34,7 +41,6 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     with gzip.GzipFile(fileobj=buf) as gz:
         raw = pd.read_csv(gz, sep="\t", low_memory=False)
 
-    # split the composite key into dimension columns
     key_col = raw.columns[0]
     dims = key_col.split("\\")[0].split(",")
     raw = raw.rename(columns={key_col: "series_keys"})
@@ -42,56 +48,44 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     keys.columns = dims
     df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
 
-    # melt the year-columns
     year_cols = [c for c in df.columns if c not in dims]
-    long = df.melt(id_vars=dims, value_vars=year_cols,
-                   var_name="Year", value_name="raw_rate")
+    long = df.melt(
+        id_vars=dims,
+        value_vars=year_cols,
+        var_name="Year",
+        value_name="raw_rate"
+    )
 
-    # clean and convert
     long["Year"] = long["Year"].str.strip().astype(int)
     long["Rate"] = pd.to_numeric(
         long["raw_rate"].str.strip().replace(":", np.nan),
         errors="coerce"
     )
 
-    # dynamic unit filter: picks "RT" for historical and "NR" for modern
     units = long["unit"].unique()
-    if "RT" in units:
-        unit_val = "RT"
-    elif "NR" in units:
-        unit_val = "NR"
-    else:
-        unit_val = None
+    unit_val = "RT" if "RT" in units else ("NR" if "NR" in units else None)
 
     mask = pd.Series(True, index=long.index)
     if unit_val:
         mask &= (long["unit"] == unit_val)
-
-    # common filters: annual, total population
     mask &= (long.get("freq") == "A")
     mask &= (long.get("sex") == "T")
     mask &= (long.get("age") == "TOTAL")
     if "resid" in long.columns:
         mask &= (long["resid"] == "TOT_IN")
 
-    sub = long[mask].copy()
-    # rename for clarity
-    sub = sub.rename(columns={"icd10": "Cause", "geo": "Region"})
+    sub = long[mask].copy().rename(columns={"icd10": "Cause", "geo": "Region"})
     return sub[["Region", "Year", "Cause", "Rate"]]
 
 @st.cache_data
 def load_historical_rates() -> pd.DataFrame:
-    """Load 1994–2010 national rates from hlth_cd_asdr (unit=RT)."""
     df = load_eurostat_series("hlth_cd_asdr")
-    # in this dataset Region==country code
     df = df.rename(columns={"Region": "Country"})
     return df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
 @st.cache_data
 def load_modern_rates() -> pd.DataFrame:
-    """Load 2011–present rates from hlth_cd_asdr2, filtering to country codes."""
     df = load_eurostat_series("hlth_cd_asdr2")
-    # Region holds NUTS2 codes *and* country codes—keep only country codes (length==2)
     df["Region"] = df["Region"].astype(str)
     df_ctry = df[df["Region"].str.match(r"^[A-Z]{2}$")].copy()
     df_ctry = df_ctry.rename(columns={"Region": "Country"})
@@ -99,14 +93,29 @@ def load_modern_rates() -> pd.DataFrame:
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    """Concatenate 1994–2010 and 2011–present national rates into one table."""
     hist = load_historical_rates()
     mod  = load_modern_rates()
-    df = pd.concat([hist, mod], ignore_index=True)
-    return df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+    df   = pd.concat([hist, mod], ignore_index=True)
+    df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+
+    # Compute EU aggregate (simple mean over EU_CODES)
+    df_eu = (
+        df[df["Country"].isin(EU_CODES)]
+        .groupby(["Year","Cause"], as_index=False)["Rate"]
+        .mean()
+    )
+    df_eu["Country"] = "EU"
+
+    # Compute Europe aggregate (mean over all countries present)
+    df_eur = (
+        df.groupby(["Year","Cause"], as_index=False)["Rate"]
+        .mean()
+    )
+    df_eur["Country"] = "Europe"
+
+    return pd.concat([df, df_eu, df_eur], ignore_index=True)
 
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
-    """PELT change-point detection, safely handling small series."""
     clean = ts.dropna()
     if len(clean) < 2:
         return []
@@ -117,7 +126,6 @@ def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
         return []
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
-    """Compute linear‐segment slopes and Annual Percent Change (APC) for each segment."""
     df_s = df_sub.sort_values("Year")
     yrs, vals = df_s["Year"].values, df_s["Rate"].values
     bkps = detect_change_points(df_s["Rate"])[:-1]
@@ -150,9 +158,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
-    st.plotly_chart(
-        px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate")
-    )
+    st.plotly_chart(px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate"))
 
 def main():
     st.set_page_config(layout="wide", page_title="Mortality Rates 1994–Present")
@@ -160,15 +166,15 @@ def main():
 
     df = load_data()
     countries = sorted(df["Country"].unique())
-    causes    = sorted(df["Cause"].unique())
     country   = st.sidebar.selectbox("Country", countries)
+    causes    = sorted(df[df["Country"]==country]["Cause"].unique())
     cause     = st.sidebar.selectbox("Cause of Death", causes)
     yrs       = sorted(df["Year"].unique())
     y0, y1    = int(yrs[0]), int(yrs[-1])
-    year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
+    year_range= st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
-        (df["Country"]==country) &
+        (df["Country"]==country)&
         (df["Cause"]  ==cause)   &
         (df["Year"].between(*year_range))
     ]
@@ -184,7 +190,10 @@ def main():
         forecast_mortality(df_f)
 
     st.markdown("---")
-    st.info("Data harmonised from national series (1994–2010) and NUTS2 series (2011–present) by selecting country-level codes only.")
+    st.info(
+        "Data combined from national series (1994–2010) and NUTS2 series "
+        "(2011–present); EU and Europe aggregates appended as simple means."
+    )
 
 if __name__ == "__main__":
     main()
