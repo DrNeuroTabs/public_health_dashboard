@@ -15,14 +15,14 @@ import pycountry
 # Requirements:
 #   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels pycountry
 #
-# This dashboard stitches together national standardised‐death‐rate data:
+# This dashboard stitches together national standardised-death-rate data:
 #  • hlth_cd_asdr   (1994–2010 national rates, unit="RT")
 #  • hlth_cd_asdr2  (2011–present NUTS2 rates, unit="NR"), filtering
-#                   only the country‐level codes (length==2)
+#                   only the country-level codes (length==2)
 # Then it appends two aggregated series:
 #  • "EU"     – simple average across the 27 EU member states
 #  • "Europe" – simple average across all countries present
-# Finally runs joinpoint analysis, APC calc, and forecasting.
+# Finally runs joinpoint analysis, APC calculation, and forecasting.
 # --------------------------------------------------------------------------
 
 EU_CODES = [
@@ -176,8 +176,7 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
 @st.cache_data
 def load_historical_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr")
-    df = df.rename(columns={"Region": "Country"})
-    return df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+    return df.rename(columns={"Region": "Country"}).dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
 
 @st.cache_data
@@ -185,16 +184,14 @@ def load_modern_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr2")
     df["Region"] = df["Region"].astype(str)
     df_ctry = df[df["Region"].str.fullmatch(r"[A-Z]{2}")].copy()
-    df_ctry = df_ctry.rename(columns={"Region": "Country"})
-    return df_ctry.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
+    return df_ctry.rename(columns={"Region": "Country"}).dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
     hist = load_historical_rates()
-    mod  = load_modern_rates()
-    df   = pd.concat([hist, mod], ignore_index=True).dropna(subset=["Rate"])
-    df   = df.sort_values(["Country","Cause","Year"])
+    mod = load_modern_rates()
+    df = pd.concat([hist, mod], ignore_index=True).dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
     df_eu = df[df["Country"].isin(EU_CODES)].groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     df_eu["Country"] = "EU"
@@ -228,7 +225,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year": sy, "end_year": ey, "slope": np.nan, "APC_pct": np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc   = (slope / np.nanmean(seg_vals)) * 100
+            apc = (slope / np.nanmean(seg_vals)) * 100
             recs.append({"start_year": sy, "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
@@ -246,11 +243,11 @@ def plot_joinpoints(df: pd.DataFrame, country_code: str, cause_code: str, countr
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
-    m = Prophet(yearly_seasonality=False,daily_seasonality=False)
+    m = Prophet(yearly_seasonality=False, daily_seasonality=False)
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
-    st.plotly_chart(px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate"))
+    st.plotly_chart(px.line(fc, x="ds", y="yhat", title=f"Forecasted Mortality Rate ({periods} yrs ahead)"))
 
 
 def main():
@@ -261,18 +258,25 @@ def main():
     df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP).fillna(df["Country"])
     df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
+    # Country selector
     countries_full = sorted(df["CountryFull"].unique())
     country_full   = st.sidebar.selectbox("Country", countries_full)
     country_code   = REV_COUNTRY_NAME_MAP.get(country_full, country_full)
 
+    # Cause selector
     causes_full    = sorted(df[df["Country"] == country_code]["CauseFull"].unique())
     cause_full     = st.sidebar.selectbox("Cause of Death", causes_full)
     cause_code     = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
-    yrs      = sorted(df["Year"].unique())
-    y0, y1   = int(yrs[0]), int(yrs[-1])
-    year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
+    # Historical range slider
+    yrs        = sorted(df["Year"].unique())
+    y0, y1     = int(yrs[0]), int(yrs[-1])
+    year_range = st.sidebar.slider("Historical Year Range", y0, y1, (y0, y1))
 
+    # Forecast horizon slider
+    forecast_years = st.sidebar.slider("Forecast Horizon (years)", 1, 30, 10, 1)
+
+    # Filtered data
     df_f = df[
         (df["Country"] == country_code) &
         (df["Cause"]   == cause_code)   &
@@ -286,11 +290,12 @@ def main():
         plot_joinpoints(df_f, country_code, cause_code, country_full, cause_full)
         st.markdown("### Joinpoint & Annual Percent Change (APC)")
         st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
-        st.markdown("### Forecast Next 10 Years")
-        forecast_mortality(df_f)
+        st.markdown(f"### Forecast Next {forecast_years} Years")
+        forecast_mortality(df_f, periods=forecast_years)
 
     st.markdown("---")
     st.info("Data combined from national (1994–2010) and NUTS2 (2011–present) series; EU/Europe aggregates appended as simple means.")
+
 
 if __name__ == "__main__":
     main()
