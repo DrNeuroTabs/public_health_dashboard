@@ -27,15 +27,105 @@ import pycountry
 # Finally runs joinpoint analysis, APC calculation, and offers multiple forecasting methods.
 # --------------------------------------------------------------------------
 
-EU_CODES = ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
-            "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"]
+EU_CODES = [
+    "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
+    "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+]
 
 # Disease code → full description
 CAUSE_NAME_MAP = {
-    "TOTAL":"Total",
-    "A_B":"Certain infectious and parasitic diseases (A00-B99)",
-    # ... include all your mappings from before ...
-    "U072":"COVID-19, virus not identified"
+    "TOTAL":            "Total",
+    "A_B":              "Certain infectious and parasitic diseases (A00-B99)",
+    "A15-A19_B90":      "Tuberculosis",
+    "B15-B19_B942":     "Viral hepatitis and sequelae of viral hepatitis",
+    "B180-B182":        "Chronic viral hepatitis B and C",
+    "B20-B24":          "Human immunodeficiency virus [HIV] disease",
+    "A_B_OTH":          "Other infectious and parasitic diseases (A00-B99)",
+    "C00-D48":          "Neoplasms",
+    "C":                "Malignant neoplasms (C00-C97)",
+    "C00-C14":          "Malignant neoplasm of lip, oral cavity, pharynx",
+    "C15":              "Malignant neoplasm of oesophagus",
+    "C16":              "Malignant neoplasm of stomach",
+    "C18-C21":          "Malignant neoplasm of colon, rectum, anus",
+    "C22":              "Malignant neoplasm of liver and intrahepatic bile ducts",
+    "C25":              "Malignant neoplasm of pancreas",
+    "C32":              "Malignant neoplasm of larynx",
+    "C33_C34":          "Malignant neoplasm of trachea, bronchus and lung",
+    "C43":              "Malignant melanoma of skin",
+    "C50":              "Malignant neoplasm of breast",
+    "C53":              "Malignant neoplasm of cervix uteri",
+    "C54_C55":          "Malignant neoplasm of other parts of uterus",
+    "C56":              "Malignant neoplasm of ovary",
+    "C61":              "Malignant neoplasm of prostate",
+    "C64":              "Malignant neoplasm of kidney, except renal pelvis",
+    "C67":              "Malignant neoplasm of bladder",
+    "C70-C72":          "Malignant neoplasm of brain and CNS",
+    "C73":              "Malignant neoplasm of thyroid gland",
+    "C81-C86":          "Hodgkin disease and lymphomas",
+    "C88_C90_C96":      "Other lymphoid & haematopoietic neoplasms",
+    "C91-C95":          "Leukaemia",
+    "C_OTH":            "Other malignant neoplasms (C00-C97)",
+    "D00-D48":          "Non-malignant neoplasms",
+    "D50-D89":          "Diseases of blood & blood-forming organs",
+    "E":                "Endocrine, nutritional & metabolic diseases",
+    "E10-E14":          "Diabetes mellitus",
+    "E_OTH":            "Other endocrine, nutritional & metabolic diseases",
+    "F":                "Mental & behavioural disorders",
+    "F01_F03":          "Dementia",
+    "F10":              "Alcohol-related mental disorders",
+    "TOXICO":           "Drug dependence & toxicomania",
+    "F_OTH":            "Other mental & behavioural disorders",
+    "G_H":              "Nervous system & sense organs diseases",
+    "G20":              "Parkinson disease",
+    "G30":              "Alzheimer disease",
+    "G_H_OTH":          "Other nervous system & sense organ diseases",
+    "I":                "Circulatory system diseases",
+    "I20-I25":          "Ischaemic heart diseases",
+    "I21_I22":          "Acute myocardial infarction",
+    "I20_I23-I25":      "Other ischaemic heart diseases",
+    "I30-I51":          "Other heart diseases",
+    "I60-I69":          "Cerebrovascular diseases",
+    "I_OTH":            "Other circulatory diseases",
+    "J":                "Respiratory system diseases",
+    "J09-J11":          "Influenza (including swine flu)",
+    "J12-J18":          "Pneumonia",
+    "J40-J47":          "Chronic lower respiratory diseases",
+    "J45_J46":          "Asthma",
+    "J40-J44_J47":      "Other lower respiratory diseases",
+    "J_OTH":            "Other respiratory diseases",
+    "K":                "Digestive system diseases",
+    "K25-K28":          "Ulcer of stomach & duodenum",
+    "K70_K73_K74":      "Chronic liver disease",
+    "K72-K75":          "Other liver diseases",
+    "K_OTH":            "Other digestive diseases",
+    "L":                "Skin & subcutaneous tissue diseases",
+    "M":                "Musculoskeletal system diseases",
+    "RHEUM_ARTHRO":     "Rheumatoid arthritis & arthrosis",
+    "M_OTH":            "Other musculoskeletal diseases",
+    "N":                "Genitourinary system diseases",
+    "N00-N29":          "Kidney & ureter diseases",
+    "N_OTH":            "Other genitourinary diseases",
+    "O":                "Pregnancy, childbirth & puerperium",
+    "P":                "Perinatal conditions",
+    "Q":                "Congenital malformations, deformations and chromosomal abnormalities",
+    "R":                "Symptoms & abnormal clinical and laboratory findings",
+    "R95":              "Sudden infant death syndrome",
+    "R96-R99":          "Ill-defined & unknown causes of mortality",
+    "R_OTH":            "Other signs & lab findings",
+    "V01-Y89":          "External causes of morbidity and mortality",
+    "ACC":              "Accidents",
+    "V_Y85":            "Transport accidents",
+    "ACC_OTH":          "Other accidents",
+    "W00-W19":          "Falls",
+    "W65-W74":          "Accidental drowning and submersion",
+    "X60-X84_Y870":     "Intentional self-harm",
+    "X40-X49":          "Accidental poisoning by and exposure to noxious substances",
+    "X85-Y09_Y871":     "Assault",
+    "Y10-Y34_Y872":     "Event of undetermined intent",
+    "V01-Y89_OTH":      "Other external causes of morbidity and mortality",
+    "A-R_V-Y":          "All causes (A00-R99 & V01-Y89)",
+    "U071":             "COVID-19, virus identified",
+    "U072":             "COVID-19, virus not identified"
 }
 REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 
@@ -51,9 +141,11 @@ REV_COUNTRY_NAME_MAP = {v: k for k, v in COUNTRY_NAME_MAP.items()}
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
-    url = f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
+    url = (
+        f"https://ec.europa.eu/eurostat/api/dissemination/"
+        f"sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
+    )
+    resp = requests.get(url, timeout=30); resp.raise_for_status()
     buf = BytesIO(resp.content)
     with gzip.GzipFile(fileobj=buf) as gz:
         raw = pd.read_csv(gz, sep="\t", low_memory=False)
@@ -107,7 +199,6 @@ def load_data() -> pd.DataFrame:
     df_eu = df[df["Country"].isin(EU_CODES)]\
         .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     df_eu["Country"] = "EU"
-
     df_eur = df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     df_eur["Country"] = "Europe"
 
@@ -146,7 +237,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
 def plot_joinpoints(df: pd.DataFrame, country_code: str, cause_code: str, country_full: str, cause_full: str) -> None:
     sub = df[(df["Country"] == country_code) & (df["Cause"] == cause_code)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
-    fig = px.line(sub, x="Year", y="Rate", title=f"{cause_full} in {country_full}")
+    fig = px.line(sub, x="Year", y="Rate", title=f"{cause_full} Mortality Rate in {country_full}")
     for cp in cps:
         if 0 < cp < len(sub):
             fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
@@ -181,10 +272,9 @@ def get_ets_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
 
 
 def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str) -> None:
-    # If insufficient data, skip forecast gracefully
     n = df_sub["Rate"].dropna().shape[0]
     if n < 3:
-        st.warning(f"Not enough historical data ({n} points) to generate a reliable forecast.")
+        st.warning(f"Not enough data ({n} points) to forecast.")
         return
 
     prop = get_prophet_forecast(df_sub, periods)
@@ -198,7 +288,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str) -> None:
         fc["Forecast"] = fc["ARIMA"]
     elif method == "ETS":
         fc["Forecast"] = fc["ETS"]
-    else:  # Ensemble
+    else:
         fc["Forecast"] = fc[["Prophet", "ARIMA", "ETS"]].mean(axis=1)
 
     hist = df_sub[["Year", "Rate"]].rename(columns={"Rate": "History"})
