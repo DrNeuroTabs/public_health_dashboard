@@ -8,3 +8,4 @@ requests
 statsmodels
 pycountry
 icd10-cm
+pmdarima
