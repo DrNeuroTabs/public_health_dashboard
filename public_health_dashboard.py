@@ -29,6 +29,7 @@ EU_CODES = [
     "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
 ]
 
+# Map of Disease Codes → Full Descriptions
 CAUSE_NAME_MAP = {
     "TOTAL":            "Total",
     "A_B":              "Certain infectious and parasitic diseases (A00-B99)",
@@ -93,6 +94,7 @@ CAUSE_NAME_MAP = {
     "K25-K28":          "Ulcer of stomach, duodenum and jejunum",
     "K70_K73_K74":      "Chronic liver disease",
     "K_OTH":            "Other diseases of the digestive system (remainder of K00-K93)",
+    "K72-K75":          "Diseases of liver (K72-K75)",
     "L":                "Diseases of the skin and subcutaneous tissue (L00-L99)",
     "M":                "Diseases of the musculoskeletal system and connective tissue (M00-M99)",
     "RHEUM_ARTHRO":     "Rheumatoid arthritis and arthrosis (M05-M06,M15-M19)",
@@ -117,9 +119,13 @@ CAUSE_NAME_MAP = {
     "X40-X49":          "Accidental poisoning by and exposure to noxious substances",
     "X85-Y09_Y871":     "Assault",
     "Y10-Y34_Y872":     "Event of undetermined intent",
-    "V01-Y89_OTH":      "Other external causes of morbidity and mortality (remainder of V01-Y89)"
+    "V01-Y89_OTH":      "Other external causes of morbidity and mortality (remainder of V01-Y89)",
+    "A-R_V-Y":          "All causes of death (A00-R99 & V01-Y89)",
+    "U071":             "COVID-19, virus identified (U07.1)",
+    "U072":             "COVID-19, virus not identified (U07.2)"
 }
 
+# Reverse map for lookup
 REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 
 
@@ -140,18 +146,11 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
 
     year_cols = [c for c in df.columns if c not in dims]
-    long = df.melt(
-        id_vars=dims,
-        value_vars=year_cols,
-        var_name="Year",
-        value_name="raw_rate"
-    )
+    long = df.melt(id_vars=dims, value_vars=year_cols,
+                   var_name="Year", value_name="raw_rate")
 
     long["Year"] = long["Year"].str.strip().astype(int)
-    long["Rate"] = pd.to_numeric(
-        long["raw_rate"].str.strip().replace(":", np.nan),
-        errors="coerce"
-    )
+    long["Rate"] = pd.to_numeric(long["raw_rate"].str.strip().replace(":", np.nan), errors="coerce")
 
     units = long["unit"].unique()
     unit_val = "RT" if "RT" in units else ("NR" if "NR" in units else None)
@@ -192,15 +191,10 @@ def load_data() -> pd.DataFrame:
     df   = pd.concat([hist, mod], ignore_index=True)
     df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
-    df_eu = (
-        df[df["Country"].isin(EU_CODES)]
-        .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
-    )
+    df_eu = df[df["Country"].isin(EU_CODES)].groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     df_eu["Country"] = "EU"
 
-    df_eur = (
-        df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
-    )
+    df_eur = df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     df_eur["Country"] = "Europe"
 
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
@@ -230,7 +224,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year": sy, "end_year": ey, "slope": np.nan, "APC_pct": np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc   = (slope / np.nanmean(seg_vals)) * 100
+            apc = (slope / np.nanmean(seg_vals)) * 100
             recs.append({"start_year": sy, "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
@@ -238,10 +232,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
 def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
     sub = df[(df["Country"] == country) & (df["Cause"] == cause)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
-    fig = px.line(
-        sub, x="Year", y="Rate",
-        title=f"{CAUSE_NAME_MAP.get(cause, cause)} Mortality Rate in {country}"
-    )
+    fig = px.line(sub, x="Year", y="Rate", title=f"{CAUSE_NAME_MAP.get(cause, cause)} Mortality Rate in {country}")
     for cp in cps:
         if 0 < cp < len(sub):
             fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
@@ -255,9 +246,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
-    st.plotly_chart(
-        px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate")
-    )
+    st.plotly_chart(px.line(fc, x="ds", y="yhat", title="Forecasted Mortality Rate"))
 
 
 def main():
@@ -265,14 +254,13 @@ def main():
     st.title("Standardised Mortality Rates (1994–Present) by Country")
 
     df = load_data()
-
     df["CauseFull"] = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
     countries = sorted(df["Country"].unique())
-    country   = st.sidebar.selectbox("Country", countries)
+    country = st.sidebar.selectbox("Country", countries)
 
     causes_full = sorted(df[df["Country"] == country]["CauseFull"].unique())
-    cause_full  = st.sidebar.selectbox("Cause of Death", causes_full)
+    cause_full = st.sidebar.selectbox("Cause of Death", causes_full)
 
     cause_code = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
@@ -282,7 +270,7 @@ def main():
 
     df_f = df[
         (df["Country"] == country) &
-        (df["Cause"]   == cause_code) &
+        (df["Cause"] == cause_code) &
         (df["Year"].between(*year_range))
     ]
 
