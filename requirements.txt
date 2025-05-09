@@ -7,4 +7,4 @@ ruptures
 requests
 statsmodels
 pycountry
-icd10
+icd10-cm
