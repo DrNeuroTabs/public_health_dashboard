@@ -6,3 +6,5 @@ prophet
 ruptures
 requests
 statsmodels
+pycountry
+icd10
