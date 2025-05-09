@@ -22,7 +22,7 @@ def load_data() -> pd.DataFrame:
     """Download, parse, and load the Eurostat hlth_cd_aro dataset."""
     # 1) Download the compressed TSV
     url = (
-        'https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/'
+        'https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/' +
         'hlth_cd_aro?format=TSV&compressed=true'
     )
     resp = requests.get(url)
@@ -34,7 +34,7 @@ def load_data() -> pd.DataFrame:
         df = pd.read_csv(gz, sep='\t', low_memory=False)
 
     # 3) Split the combined-key column into separate dims
-    key_col = df.columns[0]  # 'freq,unit,sex,age,icd10,resid,geo\TIME_PERIOD'
+    key_col = df.columns[0]  # e.g. 'freq,unit,sex,age,icd10,resid,geo\TIME_PERIOD'
     dims_part = key_col.split('\\')[0]  # 'freq,unit,sex,age,icd10,resid,geo'
     dims = dims_part.split(',')
     df = df.rename(columns={key_col: 'series_keys'})
@@ -42,7 +42,7 @@ def load_data() -> pd.DataFrame:
     keys_df.columns = dims
     df = pd.concat([keys_df, df.drop(columns=['series_keys'])], axis=1)
 
-    # 4) Melt year columns into long format
+    # 4) Melt year-columns into long format
     year_cols = [c for c in df.columns if c not in dims]
     df_long = df.melt(
         id_vars=dims,
@@ -53,10 +53,10 @@ def load_data() -> pd.DataFrame:
 
     # 5) Clean and type-convert
     df_long['Year'] = df_long['Year'].str.strip().astype(int)
-    df_long['Rate'] = (
-        df_long['raw_rate']
-        .replace(':', np.nan)
-        .astype(float)
+    df_long['raw_rate'] = df_long['raw_rate'].astype(str).str.strip()
+    df_long['Rate'] = pd.to_numeric(
+        df_long['raw_rate'].replace(':', np.nan),
+        errors='coerce'
     )
 
     # 6) Filter to annual normalized rates for total population
@@ -71,15 +71,17 @@ def load_data() -> pd.DataFrame:
     # 7) Rename for clarity
     df_filtered = df_filtered.rename(columns={
         'icd10': 'Cause',
-        'geo':   'Country'
+        'geo': 'Country'
     })
 
     return df_filtered[['Country', 'Year', 'Cause', 'Rate']]
+
 
 def detect_change_points(ts: pd.Series, model: str = 'l2', pen: float = 3) -> list:
     """Use PELT algorithm to detect change-point indices in a series."""
     algo = rpt.Pelt(model=model).fit(ts.values)
     return algo.predict(pen=pen)
+
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame, model: str = 'l2', pen: float = 3) -> pd.DataFrame:
     """Compute segments from change-points and calculate APC for each segment."""
@@ -104,6 +106,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame, model: str = 'l2', pen: flo
         })
     return pd.DataFrame(results)
 
+
 def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
     sub = df[(df['Country'] == country) & (df['Cause'] == cause)].sort_values('Year')
     ts = sub['Rate']
@@ -115,6 +118,7 @@ def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
             fig.add_vline(x=cp_year, line_dash='dash')
     st.plotly_chart(fig)
 
+
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     df_prophet = df_sub[['Year', 'Rate']].rename(columns={'Year': 'ds', 'Rate': 'y'})
     df_prophet['ds'] = pd.to_datetime(df_prophet['ds'], format='%Y')
@@ -124,6 +128,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     forecast = m.predict(future)
     fig = px.line(forecast, x='ds', y='yhat', title='Forecasted Mortality Rates')
     st.plotly_chart(fig)
+
 
 def main():
     st.set_page_config(layout='wide', page_title='Public Health Dashboard')
