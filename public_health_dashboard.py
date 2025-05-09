@@ -10,20 +10,18 @@ import gzip
 from io import BytesIO
 import statsmodels.api as sm
 
-# Updated imports for mapping
-import pycountry
-import icd10  # icd10-cm package :contentReference[oaicite:0]{index=0}
-
 # --------------------------------------------------------------------------
 # Requirements:
-#   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels pycountry icd10-cm
+#   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels
 #
 # This dashboard stitches together national standardised‐death‐rate data:
 #  • hlth_cd_asdr   (1994–2010 national rates, unit="RT")
 #  • hlth_cd_asdr2  (2011–present NUTS2 rates, unit="NR"), filtering
 #                   only the country‐level codes (length==2)
-# It then appends “EU” and “Europe” aggregates, maps codes → names,
-# and runs joinpoint analysis, APC calculations, and forecasting.
+# Then it appends two aggregated series:
+#  • "EU"     – simple average across the 27 EU member states
+#  • "Europe" – simple average across all countries present
+# Finally runs joinpoint analysis, APC calc, and forecasting.
 # --------------------------------------------------------------------------
 
 EU_CODES = [
@@ -51,8 +49,12 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
 
     year_cols = [c for c in df.columns if c not in dims]
-    long = df.melt(id_vars=dims, value_vars=year_cols,
-                   var_name="Year", value_name="raw_rate")
+    long = df.melt(
+        id_vars=dims,
+        value_vars=year_cols,
+        var_name="Year",
+        value_name="raw_rate"
+    )
 
     long["Year"] = long["Year"].str.strip().astype(int)
     long["Rate"] = pd.to_numeric(
@@ -62,10 +64,10 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
 
     units = long["unit"].unique()
     unit_val = "RT" if "RT" in units else ("NR" if "NR" in units else None)
+
     mask = pd.Series(True, index=long.index)
     if unit_val:
         mask &= (long["unit"] == unit_val)
-
     mask &= (long.get("freq") == "A")
     mask &= (long.get("sex") == "T")
     mask &= (long.get("age") == "TOTAL")
@@ -85,7 +87,7 @@ def load_historical_rates() -> pd.DataFrame:
 def load_modern_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr2")
     df["Region"] = df["Region"].astype(str)
-    df_ctry = df[df["Region"].str.fullmatch(r"[A-Z]{2}")].copy()
+    df_ctry = df[df["Region"].str.match(r"^[A-Z]{2}$")].copy()
     df_ctry = df_ctry.rename(columns={"Region": "Country"})
     return df_ctry.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
@@ -96,35 +98,22 @@ def load_data() -> pd.DataFrame:
     df   = pd.concat([hist, mod], ignore_index=True)
     df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
+    # Compute EU aggregate (simple mean over EU_CODES)
     df_eu = (
         df[df["Country"].isin(EU_CODES)]
-        .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
+        .groupby(["Year","Cause"], as_index=False)["Rate"]
+        .mean()
     )
     df_eu["Country"] = "EU"
 
+    # Compute Europe aggregate (mean over all countries present)
     df_eur = (
-        df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
+        df.groupby(["Year","Cause"], as_index=False)["Rate"]
+        .mean()
     )
     df_eur["Country"] = "Europe"
 
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
-
-def map_country_name(code: str) -> str:
-    try:
-        return pycountry.countries.get(alpha_2=code).name
-    except:
-        return code
-
-def map_icd_description(icd_code: str) -> str:
-    parts = icd_code.split("_")
-    descs = []
-    for part in parts:
-        node = icd10.find(part)  # use find(), not constructor
-        if node and node.description:
-            descs.append(node.description)
-        else:
-            descs.append(part)
-    return " / ".join(descs)
 
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     clean = ts.dropna()
@@ -149,7 +138,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year":sy,"end_year":ey,"slope":np.nan,"APC_pct":np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc   = (slope / np.nanmean(seg_vals)) * 100
+            apc = (slope / np.nanmean(seg_vals)) * 100
             recs.append({"start_year":sy,"end_year":ey,"slope":slope,"APC_pct":apc})
     return pd.DataFrame(recs)
 
@@ -165,7 +154,7 @@ def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
-    m = Prophet(yearly_seasonality=False,daily_seasonality=False)
+    m = Prophet(yearly_seasonality=False, daily_seasonality=False)
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
@@ -176,28 +165,23 @@ def main():
     st.title("Standardised Mortality Rates (1994–Present) by Country")
 
     df = load_data()
-    # map codes to names
-    df["CountryName"] = df["Country"].map(map_country_name)
-    df["CauseName"]   = df["Cause"].map(map_icd_description)
-
-    countries = sorted(df["CountryName"].unique())
-    country    = st.sidebar.selectbox("Country", countries)
-    causes     = sorted(df[df["CountryName"]==country]["CauseName"].unique())
-    cause      = st.sidebar.selectbox("Cause of Death", causes)
-
-    yrs        = sorted(df["Year"].unique())
-    y0, y1     = int(yrs[0]), int(yrs[-1])
-    year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
+    countries = sorted(df["Country"].unique())
+    country   = st.sidebar.selectbox("Country", countries)
+    causes    = sorted(df[df["Country"]==country]["Cause"].unique())
+    cause     = st.sidebar.selectbox("Cause of Death", causes)
+    yrs       = sorted(df["Year"].unique())
+    y0, y1    = int(yrs[0]), int(yrs[-1])
+    year_range= st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
-        (df["CountryName"]==country)&
-        (df["CauseName"]  ==cause)   &
+        (df["Country"]==country)&
+        (df["Cause"]  ==cause)   &
         (df["Year"].between(*year_range))
     ]
 
     st.header(f"{cause} Mortality Rate in {country} ({year_range[0]}–{year_range[1]})")
     if df_f.empty:
-        st.warning("No data for selected filters.")
+        st.warning("No data available for selected filters.")
     else:
         plot_joinpoints(df_f, country, cause)
         st.markdown("### Joinpoint & Annual Percent Change (APC)")
@@ -206,7 +190,10 @@ def main():
         forecast_mortality(df_f)
 
     st.markdown("---")
-    st.info("Data combined from national (1994–2010) and NUTS2 (2011–present) series; codes replaced with full names.")
+    st.info(
+        "Data combined from national series (1994–2010) and NUTS2 series "
+        "(2011–present); EU and Europe aggregates appended as simple means."
+    )
 
 if __name__ == "__main__":
     main()
