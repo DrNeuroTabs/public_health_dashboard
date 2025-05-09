@@ -29,7 +29,6 @@ EU_CODES = [
     "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
 ]
 
-# Map of Disease Codes → Full Descriptions
 CAUSE_NAME_MAP = {
     "TOTAL":            "Total",
     "A_B":              "Certain infectious and parasitic diseases (A00-B99)",
@@ -121,16 +120,12 @@ CAUSE_NAME_MAP = {
     "V01-Y89_OTH":      "Other external causes of morbidity and mortality (remainder of V01-Y89)"
 }
 
-# Reverse map for lookup
 REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
 
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
-    url = (
-        f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/
-        2.1/data/{dataset_id}?format=TSV&compressed=true"
-    )
+    url = f"https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     buf = BytesIO(resp.content)
@@ -197,14 +192,12 @@ def load_data() -> pd.DataFrame:
     df   = pd.concat([hist, mod], ignore_index=True)
     df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
-    # EU aggregate
     df_eu = (
         df[df["Country"].isin(EU_CODES)]
         .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
     df_eu["Country"] = "EU"
 
-    # Europe aggregate
     df_eur = (
         df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
@@ -237,7 +230,7 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year": sy, "end_year": ey, "slope": np.nan, "APC_pct": np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc = (slope / np.nanmean(seg_vals)) * 100
+            apc   = (slope / np.nanmean(seg_vals)) * 100
             recs.append({"start_year": sy, "end_year": ey, "slope": slope, "APC_pct": apc})
     return pd.DataFrame(recs)
 
@@ -273,16 +266,14 @@ def main():
 
     df = load_data()
 
-    # Build a column of full cause names
     df["CauseFull"] = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
 
     countries = sorted(df["Country"].unique())
-    country = st.sidebar.selectbox("Country", countries)
+    country   = st.sidebar.selectbox("Country", countries)
 
     causes_full = sorted(df[df["Country"] == country]["CauseFull"].unique())
-    cause_full = st.sidebar.selectbox("Cause of Death", causes_full)
+    cause_full  = st.sidebar.selectbox("Cause of Death", causes_full)
 
-    # Reverse lookup code from full name, fallback to full name itself
     cause_code = REV_CAUSE_NAME_MAP.get(cause_full, cause_full)
 
     yrs = sorted(df["Year"].unique())
@@ -291,7 +282,7 @@ def main():
 
     df_f = df[
         (df["Country"] == country) &
-        (df["Cause"] == cause_code) &
+        (df["Cause"]   == cause_code) &
         (df["Year"].between(*year_range))
     ]
 
