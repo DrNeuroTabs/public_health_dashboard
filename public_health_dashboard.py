@@ -29,6 +29,60 @@ EU_CODES = [
     "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
 ]
 
+# —————————————————————————————————————————————————————————————————————————————
+# Map of Disease Codes → Full Descriptions
+CAUSE_NAME_MAP = {
+    "F_OTH":    "Other mental and behavioural disorders (remainder of F00-F99)",
+    "G_H":      "Diseases of the nervous system and the sense organs (G00-H95)",
+    "G20":      "Parkinson disease",
+    "G30":      "Alzheimer disease",
+    "G_H_OTH":  "Other diseases of the nervous system and the sense organs (remainder of G00-H95)",
+    "I":        "Diseases of the circulatory system (I00-I99)",
+    "I20-I25":  "Ischaemic heart diseases",
+    "I21_I22":  "Acute myocardial infarction including subsequent myocardial infarction",
+    "I20_I23-I25": "Other ischaemic heart diseases",
+    "I30-I51": "Other heart diseases",
+    "I60-I69": "Cerebrovascular diseases",
+    "I_OTH":   "Other diseases of the circulatory system (remainder of I00-I99)",
+    "J":        "Diseases of the respiratory system (J00-J99)",
+    "J09-J11":  "Influenza (including swine flu)",
+    "J12-J18":  "Pneumonia",
+    "J40-J47":  "Chronic lower respiratory diseases",
+    "J45_J46":  "Asthma and status asthmaticus",
+    "J40-J44_J47": "Other lower respiratory diseases",
+    "J_OTH":   "Other diseases of the respiratory system (remainder of J00-J99)",
+    "K":        "Diseases of the digestive system (K00-K93)",
+    "K25-K28":  "Ulcer of stomach, duodenum and jejunum",
+    "K70_K73_K74": "Chronic liver disease",
+    "K_OTH":   "Other diseases of the digestive system (remainder of K00-K93)",
+    "L":        "Diseases of the skin and subcutaneous tissue (L00-L99)",
+    "M":        "Diseases of the musculoskeletal system and connective tissue (M00-M99)",
+    "RHEUM_ARTHRO": "Rheumatoid arthritis and arthrosis (M05-M06,M15-M19)",
+    "M_OTH":   "Other diseases of the musculoskeletal system and connective tissue (remainder of M00-M99)",
+    "N":        "Diseases of the genitourinary system (N00-N99)",
+    "N00-N29":  "Diseases of kidney and ureter",
+    "N_OTH":   "Other diseases of the genitourinary system (remainder of N00-N99)",
+    "O":        "Pregnancy, childbirth and the puerperium (O00-O99)",
+    "P":        "Certain conditions originating in the perinatal period (P00-P96)",
+    "Q":        "Congenital malformations, deformations and chromosomal abnormalities (Q00-Q99)",
+    "R":        "Symptoms, signs and abnormal clinical and laboratory findings, not elsewhere classified (R00-R99)",
+    "R95":      "Sudden infant death syndrome",
+    "R96-R99":  "Ill-defined and unknown causes of mortality",
+    "R_OTH":   "Other symptoms, signs and abnormal clinical and laboratory findings (remainder of R00-R99)",
+    "V01-Y89":  "External causes of morbidity and mortality (V01-Y89)",
+    "ACC":      "Accidents (V01-X59, Y85, Y86)",
+    "V_Y85":    "Transport accidents (V01-V99, Y85)",
+    "ACC_OTH":  "Other accidents (W20-W64, W75-X39, X50-X59, Y86)",
+    "W00-W19":  "Falls",
+    "W65-W74":  "Accidental drowning and submersion",
+    "X60-X84_Y870": "Intentional self-harm",
+    "X40-X49":  "Accidental poisoning by and exposure to noxious substances",
+    "X85-Y09_Y871": "Assault",
+    "Y10-Y34_Y872": "Event of undetermined intent",
+    "V01-Y89_OTH":  "Other external causes of morbidity and mortality (remainder of V01-Y89)"
+}
+
+# —————————————————————————————————————————————————————————————————————————————
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     url = (
@@ -87,7 +141,7 @@ def load_historical_rates() -> pd.DataFrame:
 def load_modern_rates() -> pd.DataFrame:
     df = load_eurostat_series("hlth_cd_asdr2")
     df["Region"] = df["Region"].astype(str)
-    df_ctry = df[df["Region"].str.match(r"^[A-Z]{2}$")].copy()
+    df_ctry = df[df["Region"].str.fullmatch(r"[A-Z]{2}")].copy()
     df_ctry = df_ctry.rename(columns={"Region": "Country"})
     return df_ctry.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
@@ -98,18 +152,14 @@ def load_data() -> pd.DataFrame:
     df   = pd.concat([hist, mod], ignore_index=True)
     df   = df.dropna(subset=["Rate"]).sort_values(["Country","Cause","Year"])
 
-    # Compute EU aggregate (simple mean over EU_CODES)
     df_eu = (
         df[df["Country"].isin(EU_CODES)]
-        .groupby(["Year","Cause"], as_index=False)["Rate"]
-        .mean()
+        .groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
     df_eu["Country"] = "EU"
 
-    # Compute Europe aggregate (mean over all countries present)
     df_eur = (
-        df.groupby(["Year","Cause"], as_index=False)["Rate"]
-        .mean()
+        df.groupby(["Year","Cause"], as_index=False)["Rate"].mean()
     )
     df_eur["Country"] = "Europe"
 
@@ -138,14 +188,14 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
             recs.append({"start_year":sy,"end_year":ey,"slope":np.nan,"APC_pct":np.nan})
         else:
             slope = sm.OLS(seg_vals, sm.add_constant(yrs[seg])).fit().params[1]
-            apc = (slope / np.nanmean(seg_vals)) * 100
+            apc   = (slope / np.nanmean(seg_vals)) * 100
             recs.append({"start_year":sy,"end_year":ey,"slope":slope,"APC_pct":apc})
     return pd.DataFrame(recs)
 
 def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
     sub = df[(df["Country"]==country)&(df["Cause"]==cause)].sort_values("Year")
     cps = detect_change_points(sub["Rate"])
-    fig = px.line(sub, x="Year", y="Rate", title=f"{cause} Mortality Rate in {country}")
+    fig = px.line(sub, x="Year", y="Rate", title=f"{CAUSE_NAME_MAP.get(cause, cause)} Mortality Rate in {country}")
     for cp in cps:
         if 0 < cp < len(sub):
             fig.add_vline(x=sub.iloc[cp]["Year"], line_dash="dash")
@@ -154,7 +204,7 @@ def plot_joinpoints(df: pd.DataFrame, country: str, cause: str) -> None:
 def forecast_mortality(df_sub: pd.DataFrame, periods: int = 10) -> None:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
-    m = Prophet(yearly_seasonality=False, daily_seasonality=False)
+    m = Prophet(yearly_seasonality=False,daily_seasonality=False)
     m.fit(dfp)
     future = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(future)
@@ -165,34 +215,46 @@ def main():
     st.title("Standardised Mortality Rates (1994–Present) by Country")
 
     df = load_data()
+
+    # Build a list of display names for causes
+    df["CauseFull"] = df["Cause"].map(CAUSE_NAME_MAP).fillna(df["Cause"])
+
     countries = sorted(df["Country"].unique())
     country   = st.sidebar.selectbox("Country", countries)
-    causes    = sorted(df[df["Country"]==country]["Cause"].unique())
-    cause     = st.sidebar.selectbox("Cause of Death", causes)
-    yrs       = sorted(df["Year"].unique())
-    y0, y1    = int(yrs[0]), int(yrs[-1])
-    year_range= st.sidebar.slider("Year Range", y0, y1, (y0, y1))
+
+    # Use the full names in the selectbox
+    causes    = sorted(df[df["Country"]==country]["CauseFull"].unique())
+    cause_full = st.sidebar.selectbox("Cause of Death", causes)
+
+    # Map the chosen full name back to its code for filtering
+    # (we assume every full name is unique)
+    cause_code = next(code for code, name in CAUSE_NAME_MAP.items() if name == cause_full)
+
+    yrs        = sorted(df["Year"].unique())
+    y0, y1     = int(yrs[0]), int(yrs[-1])
+    year_range = st.sidebar.slider("Year Range", y0, y1, (y0, y1))
 
     df_f = df[
-        (df["Country"]==country)&
-        (df["Cause"]  ==cause)   &
+        (df["Country"]==country) &
+        (df["Cause"]  == cause_code) &
         (df["Year"].between(*year_range))
     ]
 
-    st.header(f"{cause} Mortality Rate in {country} ({year_range[0]}–{year_range[1]})")
+    st.header(f"{cause_full} Mortality Rate in {country} ({year_range[0]}–{year_range[1]})")
     if df_f.empty:
         st.warning("No data available for selected filters.")
     else:
-        plot_joinpoints(df_f, country, cause)
+        plot_joinpoints(df_f, country, cause_code)
         st.markdown("### Joinpoint & Annual Percent Change (APC)")
-        st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
+        apc_df = compute_joinpoints_and_apc(df_f)
+        st.dataframe(apc_df, use_container_width=True)
         st.markdown("### Forecast Next 10 Years")
         forecast_mortality(df_f)
 
     st.markdown("---")
     st.info(
-        "Data combined from national series (1994–2010) and NUTS2 series "
-        "(2011–present); EU and Europe aggregates appended as simple means."
+        "Data combined from national (1994–2010) and NUTS2 (2011–present) series; "
+        "EU and Europe aggregates appended as simple means."
     )
 
 if __name__ == "__main__":
