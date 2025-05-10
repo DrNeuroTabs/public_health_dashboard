@@ -40,7 +40,6 @@ REV_SEX_NAME = {v: k for k, v in SEX_NAME_MAP.items()}
 
 # ICD‐10 cause mapping (partial; extend as needed)
 CAUSE_NAME_MAP = {
-CAUSE_NAME_MAP = {
  "TOTAL":"Total",
     "A_B":"Certain infectious and parasitic diseases (A00-B99)",
     "A15-A19_B90":"Tuberculosis",
