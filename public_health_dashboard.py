@@ -386,7 +386,7 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str, title: s
 
 def main():
     st.set_page_config(layout="wide", page_title="Public Health Dashboard")
-    st.title("Standardised Mortality Rates & Health Factors")
+    st.title("European Public Health Dashboard by Younes Adam Tabi")
 
     # Introductory text
     st.markdown(
@@ -405,7 +405,7 @@ def main():
     df["SexFull"]     = df["Sex"].map(SEX_NAME_MAP)
 
     # Sidebar controls explanation
-    st.sidebar.markdown("### Filters")
+    st.sidebar.markdown("### Filters (Scroll Down)")
     st.sidebar.markdown(
         """
         - **Country**: Select the country or region to analyze.
