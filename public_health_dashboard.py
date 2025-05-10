@@ -157,7 +157,7 @@ CAUSE_NAME_MAP = {
     "X60-X84_Y870":"Intentional self-harm",
     "X40-X49":"Accidental poisoning by and exposure to noxious substances",
     "X85-Y09_Y871":"Assault",
-    "Y10-Y34_Y872":"Event of undetermined intent",
+    "Y10-Y34_Y872":"Event of undetermined intent",  
     "V01-Y89_OTH":"Other external causes of morbidity and mortality",
     "A-R_V-Y":"All causes (A00-R99 & V01-Y89)",
     "U071":"COVID-19, virus identified",
@@ -196,11 +196,9 @@ FACTOR_IDS = {
     "Unmet needs":                  "hlth_ehis_un1e"
 }
 
-
 def alpha3_from_a2(a2: str):
     c = pycountry.countries.get(alpha_2=a2)
     return c.alpha_3 if c else None
-
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
@@ -285,7 +283,6 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     cols = ["Region","Year","Category","Sex","Rate"]
     return out[[c for c in cols if c in out.columns]]
 
-
 @st.cache_data
 def load_data() -> pd.DataFrame:
     def ld(id_):
@@ -295,40 +292,35 @@ def load_data() -> pd.DataFrame:
     mod  = ld("hlth_cd_asdr2")
     mod  = mod[mod["Country"].str.fullmatch(r"[A-Z]{2}")]
     df   = pd.concat([hist, mod], ignore_index=True).sort_values(["Country","Cause","Sex","Year"])
-    # EU & Europe averages
     df_eu  = df[df["Country"].isin(EU_CODES)].groupby(["Year","Cause","Sex"], as_index=False)["Rate"].mean()
     df_eu["Country"] = "EU"
     df_eur = df.groupby(["Year","Cause","Sex"], as_index=False)["Rate"].mean()
     df_eur["Country"] = "Europe"
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
 
-
 @st.cache_data
 def load_all_factors() -> pd.DataFrame:
-    """
-    Load every factor in FACTOR_IDS, skipping any that 404,
-    ensure a Sex column, keep only TOTAL category if present,
-    and return tall DataFrame: Country, Year, Sex, FactorName, Rate
-    """
     frames = []
     for name, ds in FACTOR_IDS.items():
         try:
             df = load_eurostat_series(ds).rename(columns={"Region":"Country"})
         except HTTPError:
             continue
-        # ensure Sex exists
+
+        # unify any EU27_… codes back to "EU"
+        df.loc[df["Country"].str.startswith("EU"), "Country"] = "EU"
+
         if "Sex" not in df.columns:
             df["Sex"] = "T"
-        # pick only TOTAL slice if Category exists
         if "Category" in df.columns:
             df = df[df["Category"] == "TOTAL"]
         df = df[["Country","Year","Sex","Rate"]].copy()
         df["FactorName"] = name
         frames.append(df)
+
     if not frames:
         return pd.DataFrame(columns=["Country","Year","Sex","Rate","FactorName"])
     return pd.concat(frames, ignore_index=True)
-
 
 def detect_change_points(ts, pen: float = 3) -> list:
     ts = pd.Series(ts).dropna()
@@ -339,7 +331,6 @@ def detect_change_points(ts, pen: float = 3) -> list:
         return algo.predict(pen=pen)
     except BadSegmentationParameters:
         return []
-
 
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
     recs = []
@@ -371,12 +362,10 @@ def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
                 })
     return pd.DataFrame(recs)
 
-
 def plot_joinpoints_comparative(df_sub: pd.DataFrame, title: str):
     df_sub["SexFull"] = df_sub["Sex"].map(SEX_NAME_MAP)
     fig = px.line(df_sub, x="Year", y="Rate", color="SexFull", title=title, markers=True)
     st.plotly_chart(fig)
-
 
 def plot_segmented_fit_series(df_sub: pd.DataFrame, title: str):
     sub = df_sub.sort_values("Year")
@@ -398,7 +387,6 @@ def plot_segmented_fit_series(df_sub: pd.DataFrame, title: str):
     fig.update_layout(title=title, xaxis_title="Year", yaxis_title="Rate")
     st.plotly_chart(fig)
 
-
 def get_prophet_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
@@ -408,7 +396,6 @@ def get_prophet_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     fc = m.predict(fut)
     return pd.DataFrame({"Year": fc["ds"].dt.year, "Prophet": fc["yhat"]})
 
-
 def get_arima_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     ser = df_sub.set_index("Year")["Rate"]
     res = ARIMA(ser, order=(1,1,1)).fit()
@@ -416,14 +403,12 @@ def get_arima_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     yrs = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
     return pd.DataFrame({"Year": yrs, "ARIMA": preds.values})
 
-
 def get_ets_forecast(df_sub: pd.DataFrame, periods: int) -> pd.DataFrame:
     ser = df_sub.set_index("Year")["Rate"]
     m = ExponentialSmoothing(ser, trend="add", seasonal=None).fit(optimized=True)
     preds = m.forecast(periods)
     yrs = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
     return pd.DataFrame({"Year": yrs, "ETS": preds.values})
-
 
 def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str, title: str):
     n = df_sub["Rate"].dropna().shape[0]
@@ -438,23 +423,20 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str, title: s
     elif method == "ARIMA":     fc["Forecast"] = fc["ARIMA"]
     elif method == "ETS":       fc["Forecast"] = fc["ETS"]
     else:                       fc["Forecast"] = fc[["Prophet","ARIMA","ETS"]].mean(axis=1)
-    hist = df_sub[["Year","Rate"]].rename(columns={"Rate":"History"})
+    hist =	df_sub[["Year","Rate"]].rename(columns={"Rate":"History"})
     combined = hist.merge(fc[["Year","Forecast"]], on="Year", how="outer")
     fig = px.line(combined, x="Year", y=["History","Forecast"], title=title)
     st.plotly_chart(fig)
-
 
 def main():
     st.set_page_config(layout="wide", page_title="Public Health Dashboard")
     st.title("Standardised Mortality Rates & Health Factors")
 
-    # Load mortality data
     df = load_data()
     df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP)
     df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP)
     df["SexFull"]     = df["Sex"].map(SEX_NAME_MAP)
 
-    # Sidebar controls
     countries    = sorted(df["CountryFull"].dropna().unique())
     country_full = st.sidebar.selectbox("Country", countries, index=countries.index("European Union"))
     country_code = REV_COUNTRY_NAME_MAP.get(country_full, country_full)
@@ -468,7 +450,6 @@ def main():
     forecast_yrs = st.sidebar.slider("Forecast Horizon (yrs)", 1, 30, 10)
     method       = st.sidebar.selectbox("Forecast Method", ["Prophet","ARIMA","ETS","Ensemble"])
 
-    # Mortality trends & forecasts
     df_f = df[
         (df["Country"]==country_code)&
         (df["Cause"]  ==cause_code)&
@@ -496,7 +477,6 @@ def main():
         for sc, sf in zip(sex_codes, sex_sel):
             forecast_mortality(df_f[df_f["Sex"]==sc], forecast_yrs, method, f"{cause_full} ({sf}) Forecast")
 
-    # Health‐factor regression
     st.markdown("---")
     st.header("Health Factors – Exploratory Regression")
     factors = st.multiselect("Select health factors", list(FACTOR_IDS.keys()))
@@ -541,7 +521,6 @@ def main():
             else:
                 st.warning("Not enough data points for regression.")
 
-    # Cluster analysis
     st.markdown("---")
     st.header("Cluster Analysis (Total Rates)")
     df_cl = df[(df["Cause"]==cause_code)&(df["Sex"]=="T")&(df["Year"].between(*year_range))]
@@ -568,78 +547,65 @@ def main():
                                       hover_name="CountryFull", locationmode="ISO-3",
                                       scope="europe", title=f"{cause_full} Clusters (k={best_k})"))
 
-    # Global Granger causality
     st.markdown("---")
     st.header("Global Granger Causality")
-    country_list = sorted(df["CountryFull"].dropna().unique())
+    country_list   = sorted(df["CountryFull"].dropna().unique())
     sel_countries = st.multiselect("Select countries (default: all)", country_list, default=country_list)
     gl_maxlag = st.slider("Max lag (yrs)", 1, 5, 2, key="gl_lag")
     gl_alpha  = st.number_input("p-value cutoff", 0.01, 0.10, 0.05, 0.01, key="gl_alpha")
     if len(sel_countries) >= 2:
-        df_g = df[(df["Cause"]==cause_code)&
-                  (df["CountryFull"].isin(sel_countries))&
-                  (df["Sex"]=="T")&
-                  (df["Year"].between(*year_range))]
+        df_g     = df[(df["Cause"]==cause_code)&(df["CountryFull"].isin(sel_countries))&(df["Sex"]=="T")&(df["Year"].between(*year_range))]
         pivot_gc = df_g.pivot_table(index="Year", columns="CountryFull", values="Rate", aggfunc="mean")
-        common = [c for c in sel_countries if c in pivot_gc.columns]
+        common   = [c for c in sel_countries if c in pivot_gc.columns]
         if len(common) >= 2:
             pvals = pd.DataFrame(np.nan, index=common, columns=common)
             for causer in common:
                 for caused in common:
-                    if causer == caused: continue
+                    if causer == caused:
+                        continue
                     data = pivot_gc[[caused, causer]].dropna()
-                    if len(data) >= gl_maxlag+1:
+                    if len(data) >= gl_maxlag + 1:
                         try:
                             res = grangercausalitytests(data, maxlag=gl_maxlag, verbose=False)
-                            ps = [res[l][0]["ssr_chi2test"][1] for l in range(1, gl_maxlag+1)]
+                            ps  = [res[l][0]["ssr_chi2test"][1] for l in range(1, gl_maxlag + 1)]
                             pvals.loc[causer, caused] = np.min(ps)
                         except:
                             pass
             hm = -np.log10(pvals)
-            fig_hm = px.imshow(hm, text_auto=".2f",
-                               labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"},
-                               title="Global Granger Heatmap")
+            fig_hm = px.imshow(hm, text_auto=".2f", labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"}, title="Global Granger Heatmap")
             st.plotly_chart(fig_hm)
-            edges = [(i,j) for i in common for j in common
-                     if i!=j and pd.notna(pvals.loc[i,j]) and pvals.loc[i,j] < gl_alpha]
+            edges = [(i, j) for i in common for j in common if i != j and pd.notna(pvals.loc[i,j]) and pvals.loc[i,j] < gl_alpha]
             theta = np.linspace(0, 2*np.pi, len(common), endpoint=False)
-            pos = {n:(np.cos(t), np.sin(t)) for n,t in zip(common,theta)}
+            pos   = {n: (np.cos(t), np.sin(t)) for n, t in zip(common, theta)}
             ex, ey = [], []
-            for s,d in edges:
-                x0,y0 = pos[s]; x1,y1 = pos[d]
-                ex += [x0, x1, None]; ey += [y0, y1, None]
+            for s, d in edges:
+                x0, y0 = pos[s]
+                x1, y1 = pos[d]
+                ex += [x0, x1, None]
+                ey += [y0, y1, None]
             nx_, ny_ = zip(*(pos[n] for n in common))
             fig_net = go.Figure()
             fig_net.add_trace(go.Scatter(x=ex, y=ey, mode="lines", line=dict(width=1), hoverinfo="none"))
-            fig_net.add_trace(go.Scatter(x=nx_, y=ny_, mode="markers+text",
-                                         marker=dict(size=20), text=common, textposition="bottom center"))
-            fig_net.update_layout(title=f"Global Network (p<{gl_alpha})",
-                                  xaxis=dict(visible=False), yaxis=dict(visible=False),
-                                  height=600)
+            fig_net.add_trace(go.Scatter(x=nx_, y=ny_, mode="markers+text", marker=dict(size=20), text=common, textposition="bottom center"))
+            fig_net.update_layout(title=f"Global Network (p<{gl_alpha})", xaxis=dict(visible=False), yaxis=dict(visible=False), height=600)
             st.plotly_chart(fig_net)
 
-    # Neighbor-based causality
     st.markdown("---")
     st.header("Neighbor-Based Causality")
     base_full = st.selectbox("Focal country", countries, index=countries.index("Germany"))
     base_code = REV_COUNTRY_NAME_MAP.get(base_full, base_full)
     nbr_codes = NEIGHBORS.get(base_code, [])
-    map_df = pd.DataFrame({
-        "Country":   [base_code] + nbr_codes,
-        "Role":      ["Focal"] + ["Neighbor"]*len(nbr_codes)
+    map_df    = pd.DataFrame({
+        "Country": [base_code] + nbr_codes,
+        "Role":    ["Focal"] + ["Neighbor"]*len(nbr_codes)
     })
     map_df["CountryFull"] = map_df["Country"].map(COUNTRY_NAME_MAP)
     map_df["iso_alpha"]   = map_df["Country"].apply(alpha3_from_a2)
-    st.plotly_chart(px.choropleth(map_df, locations="iso_alpha", color="Role",
-                                  hover_name="CountryFull", locationmode="ISO-3",
-                                  scope="europe", title="Focal & Neighbors"))
+    st.plotly_chart(px.choropleth(map_df, locations="iso_alpha", color="Role", hover_name="CountryFull", locationmode="ISO-3", scope="europe", title="Focal & Neighbors"))
 
     if nbr_codes:
-        gb = [base_code] + nbr_codes
-        df_n = df[(df["Cause"]==cause_code)&
-                  (df["Country"].isin(gb))&
-                  (df["Sex"]=="T")&
-                  (df["Year"].between(*year_range))]
+        gb      = [base_code] + nbr_codes
+        df_n    = df[(df["Cause"]==cause_code)&(df["Country"].isin(gb))&(df["Sex"]=="T")&(df["Year"].between(*year_range))]
         pivot_n = df_n.pivot_table(index="Year", columns="Country", values="Rate", aggfunc="mean")
         common_codes = [c for c in gb if c in pivot_n.columns]
         if len(common_codes) >= 2:
@@ -649,50 +615,41 @@ def main():
             pvals_n = pd.DataFrame(np.nan, index=common_codes, columns=common_codes)
             for causer in common_codes:
                 for caused in common_codes:
-                    if causer == caused: continue
+                    if causer == caused:
+                        continue
                     data = pivot_n[[caused, causer]].dropna()
-                    if len(data) >= nbr_lag+1:
+                    if len(data) >= nbr_lag + 1:
                         try:
                             res = grangercausalitytests(data, maxlag=nbr_lag, verbose=False)
-                            ps = [res[l][0]["ssr_chi2test"][1] for l in range(1, nbr_lag+1)]
+                            ps  = [res[l][0]["ssr_chi2test"][1] for l in range(1, nbr_lag + 1)]
                             pvals_n.loc[causer, caused] = np.min(ps)
                         except:
                             pass
             pvals_n.index = common_full
             pvals_n.columns = common_full
             hm_n = -np.log10(pvals_n)
-            fig_hm_n = px.imshow(hm_n, text_auto=".2f",
-                                 labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"},
-                                 title="Neighbor Heatmap")
+            fig_hm_n = px.imshow(hm_n, text_auto=".2f", labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"}, title="Neighbor Heatmap")
             st.plotly_chart(fig_hm_n)
-            edges_n = [(i,j) for i in common_full for j in common_full
-                       if i!=j and pd.notna(pvals_n.loc[i,j]) and pvals_n.loc[i,j] < nbr_alpha]
+            edges_n = [(i, j) for i in common_full for j in common_full if i != j and pd.notna(pvals_n.loc[i,j]) and pvals_n.loc[i,j] < nbr_alpha]
             theta = np.linspace(0, 2*np.pi, len(common_full), endpoint=False)
-            pos_n = {n:(np.cos(t), np.sin(t)) for n,t in zip(common_full,theta)}
+            pos_n  = {n: (np.cos(t), np.sin(t)) for n, t in zip(common_full, theta)}
             ex_n, ey_n = [], []
-            for s,d in edges_n:
-                x0,y0 = pos_n[s]; x1,y1 = pos_n[d]
-                ex_n += [x0, x1, None]; ey_n += [y0, y1, None]
+            for s, d in edges_n:
+                x0, y0 = pos_n[s]
+                x1, y1 = pos_n[d]
+                ex_n += [x0, x1, None]
+                ey_n += [y0, y1, None]
             nx_n, ny_n = zip(*(pos_n[n] for n in common_full))
             fig_net_n = go.Figure()
-            fig_net_n.add_trace(go.Scatter(x=ex_n, y=ey_n, mode="lines",
-                                           line=dict(width=1), hoverinfo="none"))
-            fig_net_n.add_trace(go.Scatter(x=nx_n, y=ny_n,
-                                           mode="markers+text",
-                                           marker=dict(size=20),
-                                           text=common_full,
-                                           textposition="bottom center"))
-            fig_net_n.update_layout(title=f"Neighbor Network (p<{nbr_alpha})",
-                                    xaxis=dict(visible=False), yaxis=dict(visible=False),
-                                    height=600)
+            fig_net_n.add_trace(go.Scatter(x=ex_n, y=ey_n, mode="lines", line=dict(width=1), hoverinfo="none"))
+            fig_net_n.add_trace(go.Scatter(x=nx_n, y=ny_n, mode="markers+text", marker=dict(size=20), text=common_full, textposition="bottom center"))
+            fig_net_n.update_layout(title=f"Neighbor Network (p<{nbr_alpha})", xaxis=dict(visible=False), yaxis=dict(visible=False), height=600)
             st.plotly_chart(fig_net_n)
 
     st.markdown("---")
     st.info(
-        "Use the sidebar & above controls to adjust sex, cause, years, forecasting, "
-        "clustering, and Granger causality parameters (global vs neighbors)."
+        "Use the sidebar & above controls to adjust sex, cause, years, forecasting, clustering, and Granger causality parameters (global vs neighbors)."
     )
-
 
 if __name__ == "__main__":
     main()
