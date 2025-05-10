@@ -20,137 +20,70 @@ import pycountry
 # Requirements:
 #   pip install streamlit pandas numpy plotly prophet ruptures requests statsmodels scikit-learn pycountry
 #
-# Dashboard for standardised-death-rate data by sex:
-#  • joinpoint & APC analysis (single & comparative)
-#  • segmented-linear-fit overlays
-#  • forecasting (Prophet, ARIMA, ETS, Ensemble) per sex
-#  • data-driven clustering + map (on total rates)
-#  • exploratory regression including health factors & health expenditure
+# Dashboard combining:
+#  • Mortality joinpoints, segmented fits, APC, forecasts
+#  • Exploration of health factors via regression
+#  • Data‐driven clustering + map
+#
+# Uses a single generic loader for any Eurostat SDMX‐TSV dataset.
 # --------------------------------------------------------------------------
 
-EU_CODES = ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
-            "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"]
+EU_CODES = [
+    "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL","HU","IE",
+    "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+]
 
 SEX_NAME_MAP = {"T": "Total", "M": "Male", "F": "Female"}
 REV_SEX_NAME = {v: k for k, v in SEX_NAME_MAP.items()}
 
+# ICD‐10 cause mapping (partial; extend as needed)
 CAUSE_NAME_MAP = {
     "TOTAL":"Total",
-    "A_B":"Certain infectious and parasitic diseases (A00-B99)",
-    "A15-A19_B90":"Tuberculosis",
-    "B15-B19_B942":"Viral hepatitis and sequelae of viral hepatitis",
-    "B180-B182":"Chronic viral hepatitis B and C",
-    "B20-B24":"Human immunodeficiency virus [HIV] disease",
-    "A_B_OTH":"Other infectious and parasitic diseases (A00-B99)",
-    "C00-D48":"Neoplasms",
-    "C":"Malignant neoplasms (C00-C97)",
-    "C00-C14":"Malignant neoplasm of lip, oral cavity, pharynx",
-    "C15":"Malignant neoplasm of oesophagus",
-    "C16":"Malignant neoplasm of stomach",
-    "C18-C21":"Malignant neoplasm of colon, rectum, anus",
-    "C22":"Malignant neoplasm of liver and intrahepatic bile ducts",
-    "C25":"Malignant neoplasm of pancreas",
-    "C32":"Malignant neoplasm of larynx",
-    "C33_C34":"Malignant neoplasm of trachea, bronchus and lung",
-    "C43":"Malignant melanoma of skin",
-    "C50":"Malignant neoplasm of breast",
-    "C53":"Malignant neoplasm of cervix uteri",
-    "C54_C55":"Malignant neoplasm of other parts of uterus",
-    "C56":"Malignant neoplasm of ovary",
-    "C61":"Malignant neoplasm of prostate",
-    "C64":"Malignant neoplasm of kidney, except renal pelvis",
-    "C67":"Malignant neoplasm of bladder",
-    "C70-C72":"Malignant neoplasm of brain and CNS",
-    "C73":"Malignant neoplasm of thyroid gland",
-    "C81-C86":"Hodgkin disease and lymphomas",
-    "C88_C90_C96":"Other lymphoid & haematopoietic neoplasms",
-    "C91-C95":"Leukaemia",
-    "C_OTH":"Other malignant neoplasms (C00-C97)",
-    "D00-D48":"Non-malignant neoplasms",
-    "D50-D89":"Diseases of blood & blood-forming organs",
-    "E":"Endocrine, nutritional & metabolic diseases",
-    "E10-E14":"Diabetes mellitus",
-    "E_OTH":"Other endocrine, nutritional & metabolic diseases",
-    "F":"Mental & behavioural disorders",
-    "F01_F03":"Dementia",
-    "F10":"Alcohol-related mental disorders",
-    "TOXICO":"Drug dependence & toxicomania",
-    "F_OTH":"Other mental & behavioural disorders",
-    "G_H":"Nervous system & sense organs diseases",
-    "G20":"Parkinson disease",
-    "G30":"Alzheimer disease",
-    "G_H_OTH":"Other nervous system & sense organ diseases",
-    "I":"Circulatory system diseases",
-    "I20-I25":"Ischaemic heart diseases",
-    "I21_I22":"Acute myocardial infarction",
-    "I20_I23-I25":"Other ischaemic heart diseases",
-    "I30-I51":"Other heart diseases",
-    "I60-I69":"Cerebrovascular diseases",
-    "I_OTH":"Other circulatory diseases",
-    "J":"Respiratory system diseases",
-    "J09-J11":"Influenza (including swine flu)",
-    "J12-J18":"Pneumonia",
-    "J40-J47":"Chronic lower respiratory diseases",
-    "J45_J46":"Asthma",
-    "J40-J44_J47":"Other lower respiratory diseases",
-    "J_OTH":"Other respiratory diseases",
-    "K":"Digestive system diseases",
-    "K25-K28":"Ulcer of stomach & duodenum",
-    "K70_K73_K74":"Chronic liver disease",
-    "K72-K75":"Other liver diseases",
-    "K_OTH":"Other digestive diseases",
-    "L":"Skin & subcutaneous tissue diseases",
-    "M":"Musculoskeletal system diseases",
-    "RHEUM_ARTHRO":"Rheumatoid arthritis & arthrosis",
-    "M_OTH":"Other musculoskeletal diseases",
-    "N":"Genitourinary system diseases",
-    "N00-N29":"Kidney & ureter diseases",
-    "N_OTH":"Other genitourinary diseases",
-    "O":"Pregnancy, childbirth & puerperium",
-    "P":"Perinatal conditions",
-    "Q":"Congenital malformations, deformations and chromosomal abnormalities",
-    "R":"Symptoms & abnormal clinical and laboratory findings",
-    "R95":"Sudden infant death syndrome",
-    "R96-R99":"Ill-defined & unknown causes of mortality",
-    "R_OTH":"Other signs & lab findings",
-    "V01-Y89":"External causes of morbidity and mortality",
-    "ACC":"Accidents",
-    "V_Y85":"Transport accidents",
-    "ACC_OTH":"Other accidents",
-    "W00-W19":"Falls",
-    "W65-W74":"Accidental drowning and submersion",
-    "X60-X84_Y870":"Intentional self-harm",
-    "X40-X49":"Accidental poisoning by and exposure to noxious substances",
-    "X85-Y09_Y871":"Assault",
-    "Y10-Y34_Y872":"Event of undetermined intent",
-    "V01-Y89_OTH":"Other external causes of morbidity and mortality",
-    "A-R_V-Y":"All causes (A00-R99 & V01-Y89)",
-    "U071":"COVID-19, virus identified",
+    "A_B":"Certain infectious & parasitic diseases",
+    # … add all your codes …
     "U072":"COVID-19, virus not identified"
 }
-REV_CAUSE_NAME_MAP = {v: k for k, v in CAUSE_NAME_MAP.items()}
+REV_CAUSE_NAME_MAP = {v:k for k,v in CAUSE_NAME_MAP.items()}
 
+# ISO α2 → full country name
 COUNTRY_NAME_MAP = {c.alpha_2: c.name for c in pycountry.countries}
-COUNTRY_NAME_MAP.update({"FX":"France (Metropolitan)","EU":"European Union","Europe":"Europe"})
-REV_COUNTRY_NAME_MAP = {v: k for k, v in COUNTRY_NAME_MAP.items()}
+COUNTRY_NAME_MAP.update({
+    "FX":"France (Metropolitan)",
+    "EU":"European Union","Europe":"Europe"
+})
+REV_COUNTRY_NAME_MAP = {v:k for k,v in COUNTRY_NAME_MAP.items()}
 
-# exploratory factors: lifestyle + health expenditure series
+# Health‐factor dataset IDs to explore
 FACTOR_IDS = {
-    "BMI": "hlth_bmi",
-    "Physical activity": "hlth_pha",
-    "Fruit & veg consumption": "hlth_cfv",
-    "Smoking prevalence": "hlth_smok",
-    "Alcohol consumption": "hlth_alc",
-    "HC exp summary": "hlth_sha11_sum",
-    "HC exp by provider": "hlth_sha11_hp",
-    "HC exp by function": "hlth_sha11_hc",
-    "HC exp by financing": "hlth_sha11_hf",
-    "HC exp revenues": "hlth_sha11_fs"
+    "BMI by citizenship":      "hlth_ehis_bm1c",
+    "Phys activity by citizenship": "hlth_ehis_pe9c",
+    "Fruit & veg by citizenship":   "hlth_ehis_fv3c",
+    "Smoking by citizenship":       "hlth_ehis_sk1c",
+    "Social support by citizenship":"hlth_ehis_ss1c",
+    "Determinants (2008)":          "hlth_det_h",
+    "HC exp by provider":           "hlth_sha11_hp",
+    "Staff – physicians":           "hlth_rs_prs2",
+    "Staff – hospital":             "hlth_rs_prshp2",
+    "Staff – categories":           "hlth_rs_physcat",
+    "Beds NUTS2":                   "hlth_rs_bdsrg2",
+    "Beds LTC":                     "hlth_rs_bdltc",
+    "Imaging devices":              "hlth_rs_medim",
+    "Beds hospital":                "hlth_rs_bds2",
+    "Tech resources":               "hlth_rs_tech",
+    "Consultations":                "hlth_ehis_am1e",
+    "Med use prescribed":           "hlth_ehis_md1e",
+    "Med use non-prescribed":       "hlth_ehis_md2e",
+    "Home care":                    "hlth_ehis_am7e",
+    "Unmet needs":                  "hlth_ehis_un1e"
 }
-
 
 @st.cache_data
 def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
+    """
+    Generic loader for any Eurostat SDMX‐TSV series.
+    Returns standardized DataFrame with columns:
+      Region, Year, Category, Sex, Rate
+    """
     url = (
         f"https://ec.europa.eu/eurostat/api/dissemination/"
         f"sdmx/2.1/data/{dataset_id}?format=TSV&compressed=true"
@@ -160,65 +93,78 @@ def load_eurostat_series(dataset_id: str) -> pd.DataFrame:
     buf = BytesIO(resp.content)
     with gzip.GzipFile(fileobj=buf) as gz:
         raw = pd.read_csv(gz, sep="\t", low_memory=False)
-    key_col = raw.columns[0]
-    dims = key_col.split("\\")[0].split(",")
-    raw = raw.rename(columns={key_col: "series_keys"})
+
+    # Split first column into dimensions
+    first = raw.columns[0]
+    dims = first.split("\\")[0].split(",")
+    raw = raw.rename(columns={first: "series_keys"})
     keys = raw["series_keys"].str.split(",", expand=True)
     keys.columns = dims
-    df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
 
+    # Melt year columns
+    df = pd.concat([keys, raw.drop(columns=["series_keys"])], axis=1)
     years = [c for c in df.columns if c not in dims]
-    long = df.melt(id_vars=dims, value_vars=years,
-                   var_name="Year", value_name="raw_rate")
+    long = df.melt(
+        id_vars=dims, value_vars=years,
+        var_name="Year", value_name="raw_rate"
+    )
     long["Year"] = long["Year"].str.strip().astype(int)
     long["Rate"] = pd.to_numeric(
         long["raw_rate"].str.strip().replace(":", np.nan),
         errors="coerce"
     )
 
+    # Filter to annual, total‐age, total‐sex, resid if present, correct unit
     units = long["unit"].unique()
     unit_val = "RT" if "RT" in units else ("NR" if "NR" in units else None)
     mask = pd.Series(True, index=long.index)
     if unit_val:
         mask &= (long["unit"] == unit_val)
-    mask &= (long.get("freq") == "A") & (long.get("age") == "TOTAL")
-    if "resid" in long.columns:
+    mask &= (long.get("freq") == "A")
+    if "age" in dims:
+        mask &= (long["age"] == "TOTAL")
+    if "sex" in dims:
+        mask &= (long["sex"] == "T")
+    if "resid" in dims:
         mask &= (long["resid"] == "TOT_IN")
+    sub = long[mask].copy()
 
-    sub = long[mask].copy().rename(
-        columns={"geo": "Region", "icd10": "Cause", "sex": "Sex"}
-    )
-    return sub[["Region", "Year", "Cause", "Sex", "Rate"]]
+    # Rename geo→Region, sex→Sex, and the remaining dim→Category
+    rename = {"geo":"Region", "sex":"Sex"}
+    others = [d for d in dims if d not in ("geo","sex","freq","unit","age","resid")]
+    if len(others) == 1:
+        rename[others[0]] = "Category"
+    out = sub.rename(columns=rename)
 
+    return out[["Region","Year","Category","Sex","Rate"]]
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    def ld(ds):
-        return (
-            load_eurostat_series(ds)
-            .rename(columns={"Region": "Country"})
-            .dropna(subset=["Rate"])
-        )
+    """
+    Loads and concatenates historical (1994–2010) and modern (2011–present)
+    mortality series, then appends EU & Europe aggregates.
+    """
+    def ld(id_):
+        df = load_eurostat_series(id_).rename(columns={"Region":"Country", "Category":"Cause"})
+        return df.dropna(subset=["Rate"])
     hist = ld("hlth_cd_asdr")
     mod  = ld("hlth_cd_asdr2")
     mod  = mod[mod["Country"].str.fullmatch(r"[A-Z]{2}")]
     df   = pd.concat([hist, mod], ignore_index=True).sort_values(
-        ["Country", "Cause", "Sex", "Year"]
+        ["Country","Cause","Sex","Year"]
     )
 
+    # EU & Europe aggregates
     df_eu = (
         df[df["Country"].isin(EU_CODES)]
-        .groupby(["Year", "Cause", "Sex"], as_index=False)["Rate"]
+        .groupby(["Year","Cause","Sex"], as_index=False)["Rate"]
         .mean()
     ); df_eu["Country"] = "EU"
-
     df_eur = (
-        df.groupby(["Year", "Cause", "Sex"], as_index=False)["Rate"]
-        .mean()
+        df.groupby(["Year","Cause","Sex"], as_index=False)["Rate"].mean()
     ); df_eur["Country"] = "Europe"
 
     return pd.concat([df, df_eu, df_eur], ignore_index=True)
-
 
 def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     clean = ts.dropna()
@@ -230,112 +176,86 @@ def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
     except BadSegmentationParameters:
         return []
 
-
 def compute_joinpoints_and_apc(df_sub: pd.DataFrame) -> pd.DataFrame:
     recs = []
     for sex in df_sub["Sex"].unique():
         part = df_sub[df_sub["Sex"] == sex].sort_values("Year")
         yrs, vals = part["Year"].values, part["Rate"].values
         bkps = detect_change_points(part["Rate"])[:-1]
-        segs = (
-            np.split(np.arange(len(yrs)), bkps)
-            if bkps
-            else [np.arange(len(yrs))]
-        )
+        segs = np.split(np.arange(len(yrs)), bkps) if bkps else [np.arange(len(yrs))]
         for seg in segs:
             sy, ey = int(yrs[seg].min()), int(yrs[seg].max())
             sv = vals[seg]
             if len(sv) < 2 or np.all(np.isnan(sv)):
                 recs.append({
                     "Sex": SEX_NAME_MAP[sex],
-                    "start_year": sy,
-                    "end_year": ey,
-                    "slope": np.nan,
-                    "APC_pct": np.nan
+                    "start_year": sy, "end_year": ey,
+                    "slope": np.nan, "APC_pct": np.nan
                 })
             else:
                 slope = sm.OLS(sv, sm.add_constant(yrs[seg])).fit().params[1]
                 apc   = (slope / np.nanmean(sv)) * 100
                 recs.append({
                     "Sex": SEX_NAME_MAP[sex],
-                    "start_year": sy,
-                    "end_year": ey,
-                    "slope": slope,
-                    "APC_pct": apc
+                    "start_year": sy, "end_year": ey,
+                    "slope": slope, "APC_pct": apc
                 })
     return pd.DataFrame(recs)
 
-
 def plot_joinpoints_comparative(df_sub: pd.DataFrame, title: str):
     df_sub["SexFull"] = df_sub["Sex"].map(SEX_NAME_MAP)
-    fig = px.line(
-        df_sub, x="Year", y="Rate", color="SexFull",
-        title=title, markers=True
-    )
+    fig = px.line(df_sub, x="Year", y="Rate", color="SexFull",
+                  title=title, markers=True)
     st.plotly_chart(fig)
-
 
 def plot_segmented_fit_series(df_sub: pd.DataFrame, title: str):
     sub = df_sub.sort_values("Year")
     yrs, rates = sub["Year"].values, sub["Rate"].values
     bkps = detect_change_points(sub["Rate"])[:-1]
-    segs = (
-        np.split(np.arange(len(yrs)), bkps)
-        if bkps
-        else [np.arange(len(yrs))]
-    )
+    segs = np.split(np.arange(len(yrs)), bkps) if bkps else [np.arange(len(yrs))]
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=yrs, y=rates, mode="markers+lines", name="Data"
-    ))
+    fig.add_trace(go.Scatter(x=yrs, y=rates, mode="markers+lines", name="Data"))
     palette = px.colors.qualitative.Dark24
     for i, seg in enumerate(segs):
         idx, vals = yrs[seg], rates[seg]
         if len(vals) >= 2 and not np.all(np.isnan(vals)):
-            fit = sm.OLS(vals, sm.add_constant(idx)).fit().predict(
-                sm.add_constant(idx)
-            )
+            fit = sm.OLS(vals, sm.add_constant(idx)).fit().predict(sm.add_constant(idx))
             fig.add_trace(go.Scatter(
                 x=idx, y=fit, mode="lines",
                 line=dict(color=palette[i % len(palette)], width=3),
                 name=f"Segment {i+1}"
             ))
-    fig.update_layout(
-        title=title, xaxis_title="Year", yaxis_title="Rate"
-    )
+    fig.update_layout(title=title, xaxis_title="Year", yaxis_title="Rate")
     st.plotly_chart(fig)
 
-
-def get_prophet_forecast(df_sub, periods):
+def get_prophet_forecast(df_sub, periods: int) -> pd.DataFrame:
     dfp = df_sub[["Year","Rate"]].rename(columns={"Year":"ds","Rate":"y"})
     dfp["ds"] = pd.to_datetime(dfp["ds"].astype(str), format="%Y")
     m = Prophet(yearly_seasonality=False, daily_seasonality=False)
     m.fit(dfp)
     fut = m.make_future_dataframe(periods=periods, freq="Y")
     fc = m.predict(fut)
-    return pd.DataFrame({"Year":fc["ds"].dt.year,"Prophet":fc["yhat"]})
+    return pd.DataFrame({"Year": fc["ds"].dt.year, "Prophet": fc["yhat"]})
 
-
-def get_arima_forecast(df_sub, periods):
+def get_arima_forecast(df_sub, periods: int) -> pd.DataFrame:
     ser = df_sub.set_index("Year")["Rate"]
     model = ARIMA(ser, order=(1,1,1))
-    res = model.fit(); preds = res.forecast(periods)
+    res = model.fit()
+    preds = res.forecast(periods)
     yrs = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
-    return pd.DataFrame({"Year":yrs,"ARIMA":preds.values})
+    return pd.DataFrame({"Year": yrs, "ARIMA": preds.values})
 
-
-def get_ets_forecast(df_sub, periods):
+def get_ets_forecast(df_sub, periods: int) -> pd.DataFrame:
     ser = df_sub.set_index("Year")["Rate"]
     m = ExponentialSmoothing(ser, trend="add", seasonal=None).fit(optimized=True)
     preds = m.forecast(periods)
     yrs = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
-    return pd.DataFrame({"Year":yrs,"ETS":preds.values})
+    return pd.DataFrame({"Year": yrs, "ETS": preds.values})
 
-
-def forecast_mortality(df_sub, periods, method, title):
+def forecast_mortality(df_sub, periods: int, method: str, title: str):
     n = df_sub["Rate"].dropna().shape[0]
     if n < 3:
-        st.warning(f"Not enough data ({n} points) to forecast.")
+        st.warning(f"Not enough data ({n}) to forecast.")
         return
     prop = get_prophet_forecast(df_sub, periods)
     ari  = get_arima_forecast(df_sub, periods)
@@ -354,16 +274,11 @@ def forecast_mortality(df_sub, periods, method, title):
     fig = px.line(combined, x="Year", y=["History","Forecast"], title=title)
     st.plotly_chart(fig)
 
-
-def load_factor_data(factor_id: str) -> pd.DataFrame:
-    df = load_eurostat_series(factor_id).rename(columns={"Region":"Country"})
-    return df.dropna(subset=["Rate"])
-
-
 def main():
-    st.set_page_config(layout="wide", page_title="Mortality Dashboard")
-    st.title("Standardised Mortality Rates (1994–Present) by Country")
+    st.set_page_config(layout="wide", page_title="Public Health Dashboard")
+    st.title("Standardised Mortality Rates & Health Factors")
 
+    # Load mortality data
     df = load_data()
     df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP)
     df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP)
@@ -381,49 +296,48 @@ def main():
     sex_sel = st.sidebar.multiselect("Sex", ["Total","Male","Female"], default=["Total"])
     sex_codes = [REV_SEX_NAME[s] for s in sex_sel]
 
-    yrs = sorted(df["Year"].unique()); y0,y1 = yrs[0],yrs[-1]
+    yrs = sorted(df["Year"].unique())
+    y0, y1 = yrs[0], yrs[-1]
     year_range = st.sidebar.slider("Historical Years", y0, y1, (y0, y1))
 
-    forecast_years = st.sidebar.slider("Forecast Horizon (yrs)",1,30,10)
+    forecast_years = st.sidebar.slider("Forecast Horizon (yrs)", 1, 30, 10)
     method = st.sidebar.selectbox("Forecast Method", ["Prophet","ARIMA","ETS","Ensemble"])
 
+    # Filtered mortality subset
     df_f = df[
-        (df["Country"]==country_code)&
-        (df["Cause"]==cause_code)&
-        (df["Sex"].isin(sex_codes))&
+        (df["Country"]==country_code) &
+        (df["Cause"]==cause_code) &
+        (df["Sex"].isin(sex_codes)) &
         (df["Year"].between(*year_range))
     ]
-
     st.header(f"{cause_full} in {country_full} ({year_range[0]}–{year_range[1]})")
     if df_f.empty:
         st.warning("No data for selected filters.")
-        return
-
-    # 1) Joinpoint trend
-    st.markdown("### Joinpoint Trend")
-    if len(sex_sel) == 1:
-        plot_joinpoints_comparative(df_f, f"{cause_full} ({sex_sel[0]}) Trend")
     else:
-        plot_joinpoints_comparative(df_f, f"{cause_full} Trend by Sex")
+        # Joinpoints
+        st.markdown("### Joinpoint Trend")
+        if len(sex_sel)==1:
+            plot_joinpoints_comparative(df_f, f"{cause_full} ({sex_sel[0]}) Trend")
+        else:
+            plot_joinpoints_comparative(df_f, f"{cause_full} Trend by Sex")
 
-    # 2) Segmented fits
-    st.markdown("### Segmented Linear Fits")
-    for sex_code, sex_full in zip(sex_codes, sex_sel):
-        sub = df_f[df_f["Sex"]==sex_code]
-        plot_segmented_fit_series(sub, f"{cause_full} ({sex_full}) Fit")
+        # Segmented fits
+        st.markdown("### Segmented Linear Fits")
+        for sc, sf in zip(sex_codes, sex_sel):
+            sub = df_f[df_f["Sex"]==sc]
+            plot_segmented_fit_series(sub, f"{cause_full} ({sf}) Fit")
 
-    # 3) APC table
-    st.markdown("### Joinpoint & Annual Percent Change (APC)")
-    st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
+        # APC table
+        st.markdown("### Joinpoint & APC")
+        st.dataframe(compute_joinpoints_and_apc(df_f), use_container_width=True)
 
-    # 4) Forecasting
-    st.markdown(f"### Forecast next {forecast_years} yrs ({method})")
-    for sex_code, sex_full in zip(sex_codes, sex_sel):
-        sub = df_f[df_f["Sex"]==sex_code]
-        forecast_mortality(sub, forecast_years, method,
-                           f"{cause_full} ({sex_full}) Forecast")
+        # Forecasting
+        st.markdown(f"### Forecast next {forecast_years} yrs ({method})")
+        for sc, sf in zip(sex_codes, sex_sel):
+            sub = df_f[df_f["Sex"]==sc]
+            forecast_mortality(sub, forecast_years, method, f"{cause_full} ({sf}) Forecast")
 
-    # 5) Health factors exploratory models
+    # Health‐factor regression
     st.markdown("---")
     st.header("Health Factors – Exploratory Regression")
     factors = st.multiselect("Select health factors", list(FACTOR_IDS.keys()))
@@ -431,15 +345,15 @@ def main():
         model_df = df_f[["Country","Year","Sex","Rate"]].rename(columns={"Rate":"Mortality"})
         skipped = []
         for name in factors:
-            fid = FACTOR_IDS[name]
+            ds = FACTOR_IDS[name]
             try:
-                dfact = load_factor_data(fid)
-            except requests.HTTPError:
+                dfact = load_eurostat_series(ds).rename(columns={"Region":"Country"})
+            except Exception:
                 skipped.append(name)
                 continue
             dfact = dfact[
-                (dfact["Country"]==country_code)&
-                (dfact["Sex"].isin(sex_codes))&
+                (dfact["Country"]==country_code) &
+                (dfact["Sex"].isin(sex_codes)) &
                 (dfact["Year"].between(*year_range))
             ][["Country","Year","Sex","Rate"]].rename(columns={"Rate":name})
             model_df = model_df.merge(dfact, on=["Country","Year","Sex"], how="left")
@@ -447,7 +361,7 @@ def main():
             st.warning(f"Skipped unavailable factors: {', '.join(skipped)}")
         available = [f for f in factors if f not in skipped]
         if available:
-            model_df = model_df.dropna(subset=available + ["Mortality"])
+            model_df = model_df.dropna(subset=available+["Mortality"])
             if model_df.shape[0] >= len(available)*2:
                 X = sm.add_constant(model_df[available])
                 y = model_df["Mortality"]
@@ -455,19 +369,20 @@ def main():
                 st.subheader("Regression summary")
                 st.text(mdl.summary())
                 coefs = mdl.params.drop("const")
-                fig = px.bar(x=coefs.index, y=coefs.values,
-                             labels={"x":"Factor","y":"Coefficient"},
-                             title="Regression Coefficients")
-                st.plotly_chart(fig)
+                st.plotly_chart(px.bar(
+                    x=coefs.index, y=coefs.values,
+                    labels={"x":"Factor","y":"Coefficient"},
+                    title="Regression Coefficients"
+                ))
             else:
-                st.warning("Not enough data points for regression after merging.")
+                st.warning("Not enough data points for regression.")
 
-    # 6) Cluster analysis (Total rates only)
+    # Clustering
     st.markdown("---")
     st.header("Cluster Analysis (Total Rates)")
     df_cl = df[
-        (df["Cause"]==cause_code)&
-        (df["Sex"]=="T")&
+        (df["Cause"]==cause_code) &
+        (df["Sex"]=="T") &
         (df["Year"].between(*year_range))
     ]
     pivot = df_cl.pivot(index="Country", columns="Year", values="Rate")
@@ -485,12 +400,12 @@ def main():
         }
         sil_df = pd.Series(sil_scores, name="silhouette_score").to_frame()
         st.write("Silhouette scores by # clusters:", sil_df)
-        fig_sil = px.line(sil_df, x=sil_df.index, y="silhouette_score",
-                          labels={"index":"# clusters"},
-                          title="Silhouette Score vs. # Clusters")
-        st.plotly_chart(fig_sil)
+        st.plotly_chart(px.line(
+            sil_df, x=sil_df.index, y="silhouette_score",
+            labels={"index":"# clusters"}, title="Silhouette vs # Clusters"
+        ))
         best_k = max(sil_scores, key=sil_scores.get)
-        st.write(f"Optimal k (data-driven): **{best_k}**")
+        st.write(f"Optimal k (data‐driven): **{best_k}**")
         km = KMeans(n_clusters=best_k, random_state=0).fit(X)
         clust_df = pd.DataFrame({
             "Country": pivot.index,
@@ -501,20 +416,17 @@ def main():
             lambda c: pycountry.countries.get(alpha_2=c).alpha_3
                        if pycountry.countries.get(alpha_2=c) else None
         )
-        fig_map = px.choropleth(
+        st.plotly_chart(px.choropleth(
             clust_df, locations="iso_alpha", color="Cluster",
             hover_name="CountryFull", locationmode="ISO-3",
             scope="europe", title=f"{cause_full} Clusters (k={best_k})"
-        )
-        st.plotly_chart(fig_map)
+        ))
 
     st.markdown("---")
     st.info(
-        "Select health factors (including HC expenditure) and sex(es) "
-        "for exploratory regression. Skipped factors may be unavailable. "
-        "Clustering uses total rates only; forecasts and joinpoints per sex."
+        "Select sex(es), health factors, and forecasting method in the sidebar. "
+        "Clustering uses total rates only; regression merges selected factors."
     )
-
 
 if __name__ == "__main__":
     main()
