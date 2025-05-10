@@ -160,7 +160,9 @@ CAUSE_NAME_MAP = {
     "A-R_V-Y":"All causes (A00-R99 & V01-Y89)",
     "U071":"COVID-19, virus identified",
     "U072":"COVID-19, virus not identified"
-}REV_CAUSE_NAME_MAP = {v:k for k,v in CAUSE_NAME_MAP.items()}
+}
+
+REV_CAUSE_NAME_MAP = {v:k for k,v in CAUSE_NAME_MAP.items()}
 
 COUNTRY_NAME_MAP = {c.alpha_2: c.name for c in pycountry.countries}
 COUNTRY_NAME_MAP.update({
