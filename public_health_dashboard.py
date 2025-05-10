@@ -223,6 +223,12 @@ def load_all_factors() -> pd.DataFrame:
             df = load_eurostat_series(ds).rename(columns={"Region":"Country"})
         except HTTPError:
             continue
+
+        # ensure there's always a Sex column
+        if "Sex" not in df.columns:
+            df["Sex"] = "T"
+        except HTTPError:
+            continue
         if "Category" in df.columns:
             df = df[df["Category"] == "TOTAL"]
         df = df[["Country","Year","Sex","Rate"]].copy()
