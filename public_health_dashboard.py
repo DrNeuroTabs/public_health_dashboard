@@ -360,7 +360,8 @@ def main():
     countries    = sorted(df["CountryFull"].dropna().unique())
     country_full = st.sidebar.selectbox("Country", countries, index=countries.index("European Union"))
     country_code = REV_COUNTRY_NAME_MAP[country_full]
-    causes       = sorted(df[df["Country"]==country_code]["CauseFull"].unique())
+    # ← FIX: dropna() before sorting to avoid mixing NaN and strings
+    causes       = sorted(df[df["Country"]==country_code]["CauseFull"].dropna().unique())
     cause_full   = st.sidebar.selectbox("Cause of Death", causes)
     cause_code   = REV_CAUSE_NAME_MAP[cause_full]
     sex_sel      = st.sidebar.multiselect("Sex", ["Total","Male","Female"], default=["Total"])
