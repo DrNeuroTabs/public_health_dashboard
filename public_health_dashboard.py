@@ -174,7 +174,22 @@ COUNTRY_NAME_MAP.update({
 REV_COUNTRY_NAME_MAP = {v: k for k, v in COUNTRY_NAME_MAP.items()}
 
 FACTOR_IDS = {
-    # ... (full mapping as above) ...
+    "BMI by citizenship":      "hlth_ehis_bm1c",
+    "Phys activity by citizenship": "hlth_ehis_pe9c",
+    "Fruit & veg by citizenship":   "hlth_ehis_fv3c",
+    "Smoking by citizenship":       "hlth_ehis_sk1c",
+    "Social support by citizenship":"hlth_ehis_ss1c",
+    "Health care expenditure by provider": "hlth_sha11_hp",
+    "Staff – physicians":           "hlth_rs_prs2",
+    "Staff – hospital":             "hlth_rs_prshp2",
+    "Available beds in hospitals":  "hlth_rs_bdsrg2",
+    "Beds in nursing and other residential long-term care facilities": "hlth_rs_bdltc",
+    "Imaging devices":              "hlth_rs_medim",
+    "Beds hospital":                "hlth_rs_bds2",
+    "Consultations":                "hlth_ehis_am1e",
+    "Med use prescribed":           "hlth_ehis_md1e",
+    "Med use non-prescribed":       "hlth_ehis_md2e",
+    "Home care":                    "hlth_ehis_am7e",
     "Unmet needs":                  "hlth_ehis_un1e"
 }
 
