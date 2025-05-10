@@ -386,8 +386,11 @@ def forecast_mortality(df_sub: pd.DataFrame, periods: int, method: str, title: s
 
 def main():
     st.set_page_config(layout="wide", page_title="Public Health Dashboard")
-    st.title("European Public Health Dashboard by Younes Adam Tabi")
-
+    st.title("European Public Health Dashboard")
+    st.markdown("""
+     by Younes Adam Tabi
+     """
+               )
     # Introductory text
     st.markdown(
         """
