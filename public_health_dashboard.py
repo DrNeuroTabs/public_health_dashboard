@@ -321,7 +321,7 @@ def get_ets_forecast(df_sub, periods: int) -> pd.DataFrame:
     ser = df_sub.set_index("Year")["Rate"]
     m   = ExponentialSmoothing(ser, trend="add", seasonal=None).fit(optimized=True)
     preds = m.forecast(periods)
-    yrs = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
+    yrs   = np.arange(ser.index.max()+1, ser.index.max()+1+periods)
     return pd.DataFrame({"Year": yrs, "ETS": preds.values})
 
 def forecast_mortality(df_sub, periods: int, method: str, title: str):
@@ -332,8 +332,8 @@ def forecast_mortality(df_sub, periods: int, method: str, title: str):
     prop = get_prophet_forecast(df_sub, periods)
     ari  = get_arima_forecast(df_sub, periods)
     ets  = get_ets_forecast(df_sub, periods)
-    fc = prop.merge(ari, on="Year").merge(ets, on="Year")
-    if   method == "Prophet":
+    fc   = prop.merge(ari, on="Year").merge(ets, on="Year")
+    if method == "Prophet":
         fc["Forecast"] = fc["Prophet"]
     elif method == "ARIMA":
         fc["Forecast"] = fc["ARIMA"]
@@ -350,7 +350,7 @@ def main():
     st.set_page_config(layout="wide", page_title="Public Health Dashboard")
     st.title("Standardised Mortality Rates & Health Factors")
 
-    # Load data and map labels
+    # Load data
     df = load_data()
     df["CountryFull"] = df["Country"].map(COUNTRY_NAME_MAP)
     df["CauseFull"]   = df["Cause"].map(CAUSE_NAME_MAP)
@@ -360,14 +360,17 @@ def main():
     countries    = sorted(df["CountryFull"].dropna().unique())
     country_full = st.sidebar.selectbox("Country", countries, index=countries.index("European Union"))
     country_code = REV_COUNTRY_NAME_MAP[country_full]
-    # ← FIX: dropna() before sorting to avoid mixing NaN and strings
+
     causes       = sorted(df[df["Country"]==country_code]["CauseFull"].dropna().unique())
     cause_full   = st.sidebar.selectbox("Cause of Death", causes)
     cause_code   = REV_CAUSE_NAME_MAP[cause_full]
+
     sex_sel      = st.sidebar.multiselect("Sex", ["Total","Male","Female"], default=["Total"])
     sex_codes    = [REV_SEX_NAME[s] for s in sex_sel]
+
     yrs          = sorted(df["Year"].unique())
     year_range   = st.sidebar.slider("Historical Years", yrs[0], yrs[-1], (yrs[0], yrs[-1]))
+
     forecast_yrs = st.sidebar.slider("Forecast Horizon (yrs)", 1, 30, 10)
     method       = st.sidebar.selectbox("Forecast Method", ["Prophet","ARIMA","ETS","Ensemble"])
 
@@ -410,7 +413,7 @@ def main():
             ds = FACTOR_IDS[name]
             try:
                 dfact = load_eurostat_series(ds).rename(columns={"Region":"Country"})
-            except:
+            except Exception:
                 skipped.append(name)
                 continue
             dfact = dfact[
@@ -487,69 +490,88 @@ def main():
     # Granger causality
     st.markdown("---")
     st.header("Granger Causality Analysis")
+
     country_list  = sorted(df["CountryFull"].dropna().unique())
-    sel_countries = st.multiselect("Select countries (default: all)", country_list, default=country_list)
+    sel_countries = st.multiselect(
+        "Select countries (default: all)", country_list, default=country_list
+    )
     maxlag        = st.slider("Max lag (years)", 1, 5, 2)
     alpha_cutoff  = st.number_input("p-value cutoff", 0.01, 0.10, 0.05, 0.01)
 
-    if len(sel_countries) >= 2:
+    if len(sel_countries) < 2:
+        st.info("Select at least two countries to run Granger causality.")
+    else:
+        # Filter by cause & total sex
         df_c = df[
             (df["Cause"]==cause_code) &
             (df["CountryFull"].isin(sel_countries)) &
             (df["Sex"]=="T") &
             (df["Year"].between(*year_range))
         ]
+        # Pivot without dropna so columns stay consistent
         pivot_gc = df_c.pivot_table(
             index="Year", columns="CountryFull", values="Rate", aggfunc="mean"
-        ).dropna()
-
-        pvals = pd.DataFrame(np.nan, index=sel_countries, columns=sel_countries)
-        for causer in sel_countries:
-            for caused in sel_countries:
-                if causer == caused:
-                    continue
-                data = pivot_gc[[caused, causer]].dropna()
-                try:
-                    res = grangercausalitytests(data, maxlag=maxlag, verbose=False)
-                    ps  = [res[l][0]["ssr_chi2test"][1] for l in range(1, maxlag+1)]
-                    pvals.loc[causer, caused] = np.min(ps)
-                except:
-                    pvals.loc[causer, caused] = np.nan
-
-        hm = -np.log10(pvals.astype(float))
-        fig_hm = px.imshow(
-            hm, text_auto=".2f",
-            labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"},
-            title="Granger Causality Heatmap"
         )
-        st.plotly_chart(fig_hm)
 
-        edges = [
-            (i, j) for i in sel_countries for j in sel_countries
-            if i != j and pd.notna(pvals.loc[i, j]) and pvals.loc[i, j] < alpha_cutoff
-        ]
-        theta = np.linspace(0, 2*np.pi, len(sel_countries), endpoint=False)
-        pos = {n: (np.cos(t), np.sin(t)) for n, t in zip(sel_countries, theta)}
-        ex, ey = [], []
-        for src, dst in edges:
-            x0, y0 = pos[src]; x1, y1 = pos[dst]
-            ex += [x0, x1, None]; ey += [y0, y1, None]
-        nx_ = [pos[n][0] for n in sel_countries]
-        ny_ = [pos[n][1] for n in sel_countries]
+        # Only keep those countries that appear
+        common = [c for c in sel_countries if c in pivot_gc.columns]
+        if len(common) < 2:
+            st.warning("Not enough data for your selection; try fewer countries or a wider year range.")
+        else:
+            pvals = pd.DataFrame(np.nan, index=common, columns=common)
+            for causer in common:
+                for caused in common:
+                    if causer == caused:
+                        continue
+                    if {causer, caused}.issubset(pivot_gc.columns):
+                        data = pivot_gc[[caused, causer]].dropna()
+                        if len(data) >= maxlag + 1:
+                            try:
+                                res = grangercausalitytests(data, maxlag=maxlag, verbose=False)
+                                ps = [res[l][0]["ssr_chi2test"][1] for l in range(1, maxlag+1)]
+                                pvals.loc[causer, caused] = np.min(ps)
+                            except Exception:
+                                pass
 
-        fig_net = go.Figure()
-        fig_net.add_trace(go.Scatter(x=ex, y=ey, mode="lines", line=dict(width=1), hoverinfo="none"))
-        fig_net.add_trace(go.Scatter(
-            x=nx_, y=ny_, mode="markers+text",
-            marker=dict(size=20), text=sel_countries, textposition="bottom center"
-        ))
-        fig_net.update_layout(
-            title=f"Granger Network (p<{alpha_cutoff})",
-            xaxis=dict(visible=False), yaxis=dict(visible=False), height=600
-        )
-        st.plotly_chart(fig_net)
-    else:
-        st.info("Select at least two countries to run Granger causality.")
+            # Heatmap of –log₁₀(p)
+            hm = -np.log10(pvals.astype(float))
+            fig_hm = px.imshow(
+                hm,
+                text_auto=".2f",
+                labels={"x":"Predictor →","y":"Target ↓","color":"–log₁₀(p)"},
+                title="Granger Causality Heatmap"
+            )
+            st.plotly_chart(fig_hm)
+
+            # Network graph for significant links
+            edges = [
+                (i, j)
+                for i in common for j in common
+                if i != j and pd.notna(pvals.loc[i, j]) and pvals.loc[i, j] < alpha_cutoff
+            ]
+            theta = np.linspace(0, 2*np.pi, len(common), endpoint=False)
+            pos   = {n: (np.cos(t), np.sin(t)) for n, t in zip(common, theta)}
+
+            ex, ey = [], []
+            for src, dst in edges:
+                x0, y0 = pos[src]; x1, y1 = pos[dst]
+                ex += [x0, x1, None]; ey += [y0, y1, None]
+
+            nx_, ny_ = zip(*(pos[n] for n in common))
+
+            fig_net = go.Figure()
+            fig_net.add_trace(go.Scatter(
+                x=ex, y=ey, mode="lines", line=dict(width=1), hoverinfo="none"
+            ))
+            fig_net.add_trace(go.Scatter(
+                x=nx_, y=ny_, mode="markers+text",
+                marker=dict(size=20), text=common, textposition="bottom center"
+            ))
+            fig_net.update_layout(
+                title=f"Granger Network (p < {alpha_cutoff})",
+                xaxis=dict(visible=False), yaxis=dict(visible=False), height=600
+            )
+            st.plotly_chart(fig_net)
 
     st.markdown("---")
     st.info(
