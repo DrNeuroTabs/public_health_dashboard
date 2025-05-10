@@ -232,11 +232,16 @@ def load_all_factors() -> pd.DataFrame:
         return pd.DataFrame(columns=["Country","Year","Sex","Rate","FactorName"])
     return pd.concat(frames, ignore_index=True)
 
-def detect_change_points(ts: pd.Series, pen: float = 3) -> list:
-    clean = ts.dropna()
-    if len(clean) < 2:
+def detect_change_points(ts, pen: float = 3) -> list:
+    """
+    Detect change-points in a time series (supports pd.Series or np.ndarray).
+    Returns a list of break indices (including the final point).
+    """
+    # coerce to pandas Series so we can use dropna()
+    ts = pd.Series(ts).dropna()
+    if len(ts) < 2:
         return []
-    algo = rpt.Pelt(model="l2").fit(clean.values)
+    algo = rpt.Pelt(model="l2").fit(ts.values)
     try:
         return algo.predict(pen=pen)
     except BadSegmentationParameters:
